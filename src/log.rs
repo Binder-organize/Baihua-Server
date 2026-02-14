@@ -2,7 +2,7 @@ use crate::ServerState;
 use tracing::subscriber::set_global_default;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{
-    EnvFilter, Registry,
+    EnvFilter,
     fmt::{self, format::FmtSpan},
     layer::SubscriberExt,
 };
@@ -46,7 +46,7 @@ pub fn init_log(
         .with_thread_names(false);
 
     // Build subscribers.
-    let subscriber = Registry::default()
+    let subscriber = tracing_subscriber::registry()
         .with(env_filter)
         .with(console_layer)
         .with(file_layer);

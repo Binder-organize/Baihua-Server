@@ -4,9 +4,9 @@ use crate::config::AppConfig;
 use crate::log;
 use anyhow::{Context, Result, anyhow};
 use dirs::home_dir;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::fs;
-use tracing::{info, warn};
+use tracing::info;
 
 pub async fn init() -> Result<(ServerState, tracing_appender::non_blocking::WorkerGuard)> {
     println!("Start initializing the server.");

@@ -2,11 +2,13 @@
 
 mod config;
 mod console;
+mod greet;
 mod init;
 mod log;
 mod server;
+mod user;
 
-use crate::{config::AppConfig, init::init, log::init_log};
+use crate::config::AppConfig;
 use anyhow::Result;
 use std::path::PathBuf;
 use tracing::{error, info};

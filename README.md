@@ -35,6 +35,7 @@ Baihua is born to end this fragmented experience. It is a team communication too
 ## How to Use the Baihua Server
 Baihua will create a configuration file at `~/.baihua/config.toml` by default, which you can modify autonomously.
 You can also type `help` in the Baihua server console to get information about server operations.
+
 ---
 
 ## How to Participate in Baihua's Development
