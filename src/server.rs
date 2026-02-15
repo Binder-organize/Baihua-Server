@@ -19,6 +19,7 @@ pub async fn server(mut command_rx: tokio::sync::mpsc::Receiver<CommandType>, st
     let address = format!("{}:{}", state.config.server.host, state.config.server.port);
     let listener = tokio::net::TcpListener::bind(&address).await.unwrap();
 
+    // todo need to optimize.
     // Start the server.
     match axum::serve(listener, app)
         .with_graceful_shutdown(async move {

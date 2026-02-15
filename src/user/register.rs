@@ -1,52 +1,30 @@
 use axum::{
     extract::rejection::JsonRejection,
-    http::StatusCode,
-    response::IntoResponse,
     Json,
 };
+use crate::common::error::ErrorType;
 use crate::user::{NewUser, User};
 
 pub async fn register(
     user: Result<Json<NewUser>, JsonRejection>,
-) -> impl IntoResponse {
-    match user {
-        Ok(Json(user)) => {
-            let new_user = NewUser {
-                username: user.username,
-                email: user.email,
-                password: user.password,
-            };
+) -> Result<Json<serde_json::Value>, ErrorType> {
+    // Parse JSON and extract user data.
+    let Json(new_user) = user.map_err(|err| {
+        ErrorType::JsonRejectionError(err.to_string())
+    })?;
 
-            match User::new(new_user) {
-                Ok(user_created) => (
-                    StatusCode::CREATED,
-                    Json(serde_json::json!({
-                        "message": "User registered successfully.",
-                        "user": {
-                            "username": user_created.username,
-                            "email": user_created.email,
-                            "created_at": user_created.created_at
-                        }
-                    })),
-                )
-                    .into_response(),
-                Err(e) => (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({
-                        "error": format!("Registration failed: {}.", e)
-                    })),
-                )
-                    .into_response(),
-            }
+    let user_created = User::new(NewUser {
+        username: new_user.username,
+        email: new_user.email,
+        password: new_user.password,
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "message": "User registered successfully.",
+        "user": {
+            "username": user_created.username,
+            "email": user_created.email,
+            "created_at": user_created.created_at
         }
-        Err(err) => {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": format!("Invalid JSON format: {}", err),
-                })),
-            )
-                .into_response()
-        }
-    }
+    })))
 }

@@ -2,11 +2,12 @@
 
 mod config;
 mod console;
-mod greet;
+mod common;
 mod init;
 mod log;
 mod server;
 mod user;
+mod greet;
 
 use crate::config::AppConfig;
 use anyhow::Result;

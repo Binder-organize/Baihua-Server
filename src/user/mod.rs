@@ -1,7 +1,6 @@
 mod register;
 
-use anyhow::Result;
-use axum::http::StatusCode;
+use crate::common::error::ErrorType;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -14,6 +13,7 @@ pub struct User {
     // Optional and repeatable user nickname.
     nickname: Option<String>,
     phone_number: Option<String>,
+    // UTC datetime(rfc3339).
     created_at: String,
     is_active: bool,
 }
@@ -26,15 +26,19 @@ pub struct NewUser {
 }
 
 impl User {
-    pub fn new(new_user: NewUser) -> Result<User> {
+    pub fn new(new_user: NewUser) -> Result<User, ErrorType> {
         if new_user.username.is_empty() || new_user.email.is_empty() || new_user.password.is_empty()
         {
-            return Err(anyhow::anyhow!("Invalid user data.").context(StatusCode::BAD_REQUEST));
+            return Err(ErrorType::ValidationError(
+                "Username, email, and password cannot be empty.".to_string(),
+            ));
         }
 
+        // todo Added validation entries.
         // todo Database read and write sections.
 
         info!("New user: {}  is created.", new_user.username);
+        
         Ok(User {
             username: new_user.username,
             email: new_user.email,

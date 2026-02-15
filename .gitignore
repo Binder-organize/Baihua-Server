@@ -10,5 +10,8 @@ target
 *.pdb
 **/mutants.out*/
 
+# AI
+.comate
+
 # macOS
 .DS_Store
