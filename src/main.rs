@@ -1,13 +1,13 @@
 // Baihua Server, by Gavin Zheng on January 1, 2026.
 
+mod common;
 mod config;
 mod console;
-mod common;
+mod greet;
 mod init;
 mod log;
 mod server;
 mod user;
-mod greet;
 
 use crate::config::AppConfig;
 use anyhow::Result;

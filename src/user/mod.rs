@@ -1,3 +1,4 @@
+mod login;
 mod register;
 
 use crate::common::error::ErrorType;
@@ -19,17 +20,23 @@ pub struct User {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct NewUser {
+pub struct UserRegister {
     username: String,
     email: String,
     password: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct UserLogin {
+    username: String,
+    password: String,
+}
+
 impl User {
-    pub fn new(new_user: NewUser) -> Result<User, ErrorType> {
+    pub fn new(new_user: UserRegister) -> Result<User, ErrorType> {
         if new_user.username.is_empty() || new_user.email.is_empty() || new_user.password.is_empty()
         {
-            return Err(ErrorType::ValidationError(
+            return Err(ErrorType::Validation(
                 "Username, email, and password cannot be empty.".to_string(),
             ));
         }
@@ -38,7 +45,7 @@ impl User {
         // todo Database read and write sections.
 
         info!("New user: {}  is created.", new_user.username);
-        
+
         Ok(User {
             username: new_user.username,
             email: new_user.email,
@@ -52,5 +59,7 @@ impl User {
 }
 
 pub fn router() -> axum::Router {
-    axum::Router::new().route("/register", axum::routing::post(register::register))
+    axum::Router::new()
+        .route("/register", axum::routing::post(register::register))
+        .route("/login", axum::routing::post(login::login))
 }

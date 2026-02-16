@@ -1,4 +1,5 @@
 use crate::ServerState;
+use tracing::info;
 use tracing::subscriber::set_global_default;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{
@@ -53,7 +54,7 @@ pub fn init_log(
 
     set_global_default(subscriber)?;
 
-    tracing::info!("Log system initialization complete.");
+    info!("Log system initialization complete.");
 
     Ok(guard)
 }

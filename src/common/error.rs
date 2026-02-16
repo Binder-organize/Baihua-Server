@@ -1,19 +1,15 @@
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, http::StatusCode, response::IntoResponse};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ErrorType {
     // JSON deserialization error.
     #[error("Invalid JSON format: {0}")]
-    JsonRejectionError(String),
+    JsonRejection(String),
 
     // Validation error.
     #[error("Validation failed: {0}")]
-    ValidationError(String),
-
-    // User registration error.
-    #[error("User registration failed: {0}")]
-    RegistrationError(String),
+    Validation(String),
 
     // Internal server error.
     #[error("Internal server error: {0}")]
@@ -29,18 +25,16 @@ pub struct ErrorResponse {
 impl ErrorType {
     fn status_code(&self) -> StatusCode {
         match self {
-            ErrorType::JsonRejectionError(_) => StatusCode::BAD_REQUEST,
-            ErrorType::ValidationError(_) => StatusCode::BAD_REQUEST,
-            ErrorType::RegistrationError(_) => StatusCode::BAD_REQUEST,
+            ErrorType::JsonRejection(_) => StatusCode::BAD_REQUEST,
+            ErrorType::Validation(_) => StatusCode::BAD_REQUEST,
             ErrorType::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
-    
+
     fn error_code(&self) -> &'static str {
         match self {
-            ErrorType::JsonRejectionError(_) => "JSON_REJECTION_ERROR",
-            ErrorType::ValidationError(_) => "VALIDATION_ERROR",
-            ErrorType::RegistrationError(_) => "REGISTRATION_ERROR",
+            ErrorType::JsonRejection(_) => "JSON_REJECTION_ERROR",
+            ErrorType::Validation(_) => "VALIDATION_ERROR",
             ErrorType::InternalError(_) => "INTERNAL_ERROR",
         }
     }

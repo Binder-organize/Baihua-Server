@@ -1,30 +1,30 @@
-use axum::{
-    extract::rejection::JsonRejection,
-    Json,
-};
 use crate::common::error::ErrorType;
-use crate::user::{NewUser, User};
+use crate::common::response::Response;
+use crate::user::{User, UserRegister};
+use axum::{Json, extract::rejection::JsonRejection, http::StatusCode};
+use serde_json::json;
 
 pub async fn register(
-    user: Result<Json<NewUser>, JsonRejection>,
-) -> Result<Json<serde_json::Value>, ErrorType> {
+    user: Result<Json<UserRegister>, JsonRejection>,
+) -> Result<Response, ErrorType> {
     // Parse JSON and extract user data.
-    let Json(new_user) = user.map_err(|err| {
-        ErrorType::JsonRejectionError(err.to_string())
-    })?;
+    let Json(new_user) = user.map_err(|error| ErrorType::JsonRejection(error.to_string()))?;
 
-    let user_created = User::new(NewUser {
+    let user_created = User::new(UserRegister {
         username: new_user.username,
         email: new_user.email,
         password: new_user.password,
     })?;
 
-    Ok(Json(serde_json::json!({
-        "message": "User registered successfully.",
-        "user": {
-            "username": user_created.username,
-            "email": user_created.email,
-            "created_at": user_created.created_at
-        }
-    })))
+    Ok(Response::new(
+        StatusCode::CREATED,
+        json!({
+            "message": "User registered successfully.",
+            "user": {
+                "username": user_created.username,
+                "email": user_created.email,
+                "created_at": user_created.created_at
+            }
+        }),
+    ))
 }
