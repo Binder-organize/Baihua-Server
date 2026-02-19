@@ -1,29 +1,29 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppConfig {
-    pub server: ServerConfig,
-    pub log: LogConfig,
-    pub database: DatabaseConfig,
+pub struct AppConfigure {
+    pub server: ServerConfigure,
+    pub log: LogConfigure,
+    pub database: DatabaseConfigure,
 }
 
 // Server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerConfig {
+pub struct ServerConfigure {
     pub host: String,
     pub port: u16,
 }
 
 // Log configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogConfig {
+pub struct LogConfigure {
     #[serde(default = "default_log_level")]
     pub level: String, // default: info
 }
 
 // Database configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseConfig {
+pub struct DatabaseConfigure {
     pub url: String,
 
     #[serde(default = "default_max_connections")]
@@ -44,17 +44,17 @@ fn default_min_connections() -> u32 {
     5
 }
 
-impl Default for AppConfig {
+impl Default for AppConfigure {
     fn default() -> Self {
         Self {
-            server: ServerConfig {
+            server: ServerConfigure {
                 host: "127.0.0.1".to_string(),
                 port: 2424,
             },
-            log: LogConfig {
+            log: LogConfigure {
                 level: default_log_level(),
             },
-            database: DatabaseConfig {
+            database: DatabaseConfigure {
                 url: "postgres://localhost/baihua".to_string(),
                 max_connections: default_max_connections(),
                 min_connections: default_min_connections(),
@@ -63,7 +63,7 @@ impl Default for AppConfig {
     }
 }
 
-impl AppConfig {
+impl AppConfigure {
     pub fn validate(&self) -> anyhow::Result<()> {
         // validate the profile information.
         if self.server.port == 0 {

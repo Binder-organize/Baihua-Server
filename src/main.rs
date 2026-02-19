@@ -1,16 +1,16 @@
 // Baihua Server, by Gavin Zheng on January 1, 2026.
 
 mod common;
-mod config;
 mod console;
 mod greet;
-mod init;
-mod log;
+mod infrastructure;
 mod server;
 mod user;
 
-use crate::config::AppConfig;
 use anyhow::Result;
+use infrastructure::config::AppConfigure;
+use infrastructure::init;
+use sqlx::PgPool;
 use std::path::PathBuf;
 use tracing::{error, info};
 
@@ -22,8 +22,10 @@ pub struct Directory {
 
 #[derive(Clone)]
 pub struct ServerState {
-    config: AppConfig,
+    configure: AppConfigure,
+    // todo directory can be removed
     directory: Directory,
+    pool: PgPool,
 }
 
 #[tokio::main]
@@ -31,19 +33,18 @@ async fn main() -> Result<()> {
     println!("Baihua v0.1.0");
 
     // Initialize the application environment.
-    let (state, log_guard) = match init::init().await {
+    let (state, log_guard) = match init::initialize().await {
         Ok((server_state, guard)) => (server_state, guard),
-        Err(e) => {
-            eprintln!("App initialization failed: {}.", e);
-            eprintln!("Make sure you have file system write access and check the configuration.");
-            return Ok(());
+        Err(error) => {
+            eprintln!("Server initialization failed: {}.", error);
+            return Err(error);
         }
     };
 
     // Record startup information.
     info!(
         "Server address: {}:{}.",
-        state.config.server.host, state.config.server.port
+        state.configure.server.host, state.configure.server.port
     );
 
     let (command_tx, command_rx) = tokio::sync::mpsc::channel::<console::CommandType>(32);

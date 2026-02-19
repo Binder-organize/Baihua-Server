@@ -1,5 +1,5 @@
-use crate::ServerState;
-use tracing::info;
+use crate::Directory;
+use crate::infrastructure::config::AppConfigure;
 use tracing::subscriber::set_global_default;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{
@@ -9,10 +9,11 @@ use tracing_subscriber::{
 };
 
 pub fn init_log(
-    state: &ServerState,
+    directory: &Directory,
+    configure: &AppConfigure,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard, Box<dyn std::error::Error>> {
-    let logs_dir = &state.directory.log;
-    let config = &state.config.log;
+    let logs_dir = directory.log.clone();
+    let config = &configure.log;
 
     // Create a log file writer.
     let file_appender = RollingFileAppender::builder()
@@ -54,7 +55,7 @@ pub fn init_log(
 
     set_global_default(subscriber)?;
 
-    info!("Log system initialization complete.");
+    tracing::info!("Log system initialization complete.");
 
     Ok(guard)
 }
