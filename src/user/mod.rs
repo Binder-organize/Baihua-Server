@@ -3,12 +3,15 @@ mod register;
 
 use crate::ServerState;
 use crate::common::error::ErrorType;
+use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{DateTime, Utc};
+use lazy_static::lazy_static;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use sqlx::{self, Row};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 #[serde_as]
@@ -41,24 +44,59 @@ pub struct UserLogin {
     pub password: String,
 }
 
-impl User {
-    pub async fn new(
-        new_user: UserRegister,
-        pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> Result<User, ErrorType> {
+impl UserRegister {
+    pub async fn validate(&self) -> Result<(), ErrorType> {
+        // Validate the regular expression of the mailbox.
+        lazy_static! {
+            static ref EMAIL_REGEX: Result<Regex, String> = Regex::new(
+                r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])*(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])*)*$"
+            ).map_err(|error| error.to_string());
+        }
+
         // Validate username, email, and password.
-        if new_user.username.is_empty() || new_user.email.is_empty() || new_user.password.is_empty()
-        {
+        if self.username.is_empty() || self.email.is_empty() || self.password.is_empty() {
             return Err(ErrorType::Validation(
                 "Username, email, and password cannot be empty.".to_string(),
             ));
         }
 
-        // Validate email format.
-        // todo This verification is not rigorous.
-        if !new_user.email.contains('@') || !new_user.email.contains('.') {
-            return Err(ErrorType::Validation("Invalid email format.".to_string()));
+        // Email regex.
+        match EMAIL_REGEX.as_ref() {
+            Ok(regex) => {
+                if !regex.is_match(&self.email) {
+                    return Err(ErrorType::Validation(
+                        "Invalid email format. Please provide a valid email address.".to_string(),
+                    ));
+                }
+            }
+            Err(error_msg) => {
+                error!("Regex compilation failed: {}", error_msg);
+                return Err(ErrorType::InternalError(
+                    "Failed to compile email regex.".to_string(),
+                ));
+            }
         }
+
+        // Check the mailbox length.
+        if self.email.len() > 254 {
+            Err(ErrorType::Validation(
+                "Email address is too long (maximum 254 characters).".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+
+        // todo Complete the email verification function.
+    }
+}
+
+impl User {
+    pub async fn new(
+        new_user: UserRegister,
+        pool: &sqlx::Pool<sqlx::Postgres>,
+    ) -> Result<User, ErrorType> {
+        // Validate the user.
+        new_user.validate().await?;
 
         // Check if username or email already exists.
         let existing_user = sqlx::query("SELECT id FROM users WHERE username = $1 OR email = $2")
@@ -78,16 +116,18 @@ impl User {
         let uuid = Uuid::now_v7();
         let created_at = Utc::now();
 
-        // todo hash password
+        // Hash password.
+        let password_hashed = hash(new_user.password, DEFAULT_COST)
+            .map_err(|e| ErrorType::InternalError(format!("Hash password failed: {}.", e)))?;
 
-        // Insert user into database
+        // Insert user into database.
         sqlx::query(
             "INSERT INTO users (id, username, email, password, created_at, is_active) VALUES ($1, $2, $3, $4, $5, $6)"
         )
         .bind(uuid)
         .bind(&new_user.username)
         .bind(&new_user.email)
-        .bind(&new_user.password)
+        .bind(&password_hashed)
         .bind(created_at)
         .bind(true)
         .execute(pool)
@@ -158,15 +198,23 @@ impl User {
         }
     }
 
+    // Verify password.
     pub async fn verify_password(
-        &self,
-        password: String,
+        password: &str,
         username: &str,
         pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> bool {
+    ) -> Result<bool, ErrorType> {
         match Self::find_user_password(username, pool).await {
-            Ok(Some(stored_password)) => stored_password == password,
-            _ => false,
+            Ok(Some(hashed_password)) => verify(password, &hashed_password).map_err(|e| {
+                ErrorType::IncorrectInformation(format!("Failed to verify password: {}.", e))
+            }),
+            Ok(None) => Err(ErrorType::IncorrectInformation(
+                "Incorrect username or password.".to_string(),
+            )),
+            Err(error) => Err(ErrorType::IncorrectInformation(format!(
+                "Failed to find user password: {}.",
+                error
+            ))),
         }
     }
 }

@@ -4,9 +4,12 @@ use crate::greet::greet;
 use axum::Router;
 use axum::routing::get;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 
-pub async fn server(mut command_rx: tokio::sync::mpsc::Receiver<CommandType>, state: ServerState) {
+pub async fn server(
+    mut command_rx: tokio::sync::mpsc::Receiver<CommandType>,
+    state: ServerState,
+) -> Result<(), anyhow::Error> {
     info!("The server is started.");
 
     let state = Arc::new(state);
@@ -20,33 +23,34 @@ pub async fn server(mut command_rx: tokio::sync::mpsc::Receiver<CommandType>, st
         "{}:{}",
         state.configure.server.host, state.configure.server.port
     );
-    let listener = tokio::net::TcpListener::bind(&address).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&address).await?;
 
-    // todo need to optimize.
-    // Start the server.
-    match axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            loop {
-                tokio::select! {
-                    command = command_rx.recv() => {
-                        match command {
-                            Some(CommandType::Shutdown) => {
-                                break;
-                            }
-                            None => {}
-                            _ => {}
-                        }
+    // Setup graceful shutdown handler
+    let shutdown_handler = async move {
+        tokio::select! {
+            command = command_rx.recv() => {
+                match command {
+                    Some(CommandType::Shutdown) => {
+                        info!("Received shutdown command from console.");
+                    }
+                    None => {
+                        info!("Command channel closed.");
                     }
                 }
             }
-        })
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            error!("Server startup failed: {}.", e);
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received Ctrl+C signal.");
+            }
         }
-    }
+    };
+
+    // Start the server with graceful shutdown and proper error handling
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_handler)
+        .await?;
+
+    info!("Server shutdown completed successfully");
+    Ok(())
 }
 
 fn api_v1(state: Arc<ServerState>) -> Router {

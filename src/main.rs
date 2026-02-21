@@ -23,14 +23,12 @@ pub struct Directory {
 #[derive(Clone)]
 pub struct ServerState {
     configure: AppConfigure,
-    // todo directory can be removed
-    directory: Directory,
     pool: PgPool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("Baihua v0.1.0");
+    println!("Baihua Server - v0.1.0");
 
     // Initialize the application environment.
     let (state, log_guard) = match init::initialize().await {
@@ -64,10 +62,14 @@ async fn main() -> Result<()> {
         }
         reason = server_handle => {
             match reason {
-                Ok(()) => "Server requested shutdown.",
+                Ok(Ok(())) => "Server completed successfully.",
+                Ok(Err(e)) => {
+                    error!("Server task failed: {}.", e);
+                    "Server task failed."
+                }
                 Err(e) => {
-                    error!("Server task failed: {}", e);
-                    "Server task failed"
+                    error!("Server task panicked: {}.", e);
+                    "Server task panicked."
                 }
             }
         }

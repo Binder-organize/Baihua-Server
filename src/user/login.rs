@@ -9,7 +9,6 @@ use crate::common::error::ErrorType;
 use crate::common::response::Response;
 use crate::user::{User, UserLogin};
 
-#[axum::debug_handler]
 pub async fn login(
     State(state): State<Arc<ServerState>>,
     user: Result<Json<UserLogin>, JsonRejection>,
@@ -20,14 +19,7 @@ pub async fn login(
     let user = user_opt
         .ok_or_else(|| ErrorType::Validation("Invalid username or password.".to_string()))?;
 
-    if !user
-        .verify_password(
-            user_login.password.clone(),
-            &user_login.username,
-            &state.pool,
-        )
-        .await
-    {
+    if !User::verify_password(&(user_login.password), &(user_login.username), &state.pool).await? {
         return Err(ErrorType::Validation(
             "Invalid username or password.".to_string(),
         ));

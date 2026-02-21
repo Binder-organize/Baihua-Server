@@ -38,7 +38,6 @@ pub async fn initialize() -> Result<(ServerState, tracing_appender::non_blocking
 
     let state = ServerState {
         configure: configuration,
-        directory,
         pool,
     };
 

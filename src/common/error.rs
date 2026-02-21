@@ -14,6 +14,10 @@ pub enum ErrorType {
     // Internal server error.
     #[error("Internal server error: {0}")]
     InternalError(String),
+
+    // Incorrect information.
+    #[error("Incorrect information: {0}")]
+    IncorrectInformation(String),
 }
 
 #[derive(serde::Serialize)]
@@ -27,6 +31,7 @@ impl ErrorType {
         match self {
             ErrorType::JsonRejection(_) => StatusCode::BAD_REQUEST,
             ErrorType::Validation(_) => StatusCode::BAD_REQUEST,
+            ErrorType::IncorrectInformation(_) => StatusCode::BAD_REQUEST,
             ErrorType::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -35,6 +40,7 @@ impl ErrorType {
         match self {
             ErrorType::JsonRejection(_) => "JSON_REJECTION_ERROR",
             ErrorType::Validation(_) => "VALIDATION_ERROR",
+            ErrorType::IncorrectInformation(_) => "INCORRECT_INFORMATION",
             ErrorType::InternalError(_) => "INTERNAL_ERROR",
         }
     }

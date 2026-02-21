@@ -16,4 +16,5 @@ target
 # macOS
 .DS_Store
 
+# Environment
 .env

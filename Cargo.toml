@@ -21,3 +21,6 @@ thiserror = "2.0"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "postgres", "uuid", "chrono"]}
 dotenvy = "0.15.7"
 uuid = { version = "1.7", features = [ "serde", "v7"] }
+bcrypt = "0.18.0"
+regex = "1.10"
+lazy_static = "1.4"

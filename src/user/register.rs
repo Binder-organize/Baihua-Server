@@ -7,7 +7,6 @@ use axum::{Json, extract::rejection::JsonRejection, http::StatusCode};
 use serde_json::json;
 use std::sync::Arc;
 
-#[axum::debug_handler]
 pub async fn register(
     State(state): State<Arc<ServerState>>,
     user: Result<Json<UserRegister>, JsonRejection>,

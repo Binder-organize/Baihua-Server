@@ -4,7 +4,6 @@ use tracing::{error, info, warn};
 
 pub enum CommandType {
     Shutdown,
-    Status,
 }
 
 pub async fn console(command_tx: mpsc::Sender<CommandType>) {
@@ -25,7 +24,6 @@ pub async fn console(command_tx: mpsc::Sender<CommandType>) {
 
                 let command_output = match trimmed {
                     "stop" => Some(CommandType::Shutdown),
-                    "status" => Some(CommandType::Status),
                     "help" => {
                         println!(
                             "\
