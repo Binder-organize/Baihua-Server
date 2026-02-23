@@ -4,12 +4,13 @@ mod common;
 mod console;
 mod greet;
 mod infrastructure;
+mod middleware;
 mod server;
 mod user;
 
 use anyhow::Result;
 use infrastructure::config::AppConfigure;
-use infrastructure::init;
+use infrastructure::initialize;
 use sqlx::PgPool;
 use std::path::PathBuf;
 use tracing::{error, info};
@@ -31,7 +32,7 @@ async fn main() -> Result<()> {
     println!("Baihua Server - v0.1.0");
 
     // Initialize the application environment.
-    let (state, log_guard) = match init::initialize().await {
+    let (state, log_guard) = match initialize::initialize().await {
         Ok((server_state, guard)) => (server_state, guard),
         Err(error) => {
             eprintln!("Server initialization failed: {}.", error);
@@ -83,7 +84,7 @@ async fn main() -> Result<()> {
 
     drop(log_guard);
 
-    // Make sure the logging is complete.
+    // Make sure the logs are saved.
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     println!("Goodbye!");

@@ -1,3 +1,4 @@
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,21 +65,21 @@ impl Default for AppConfigure {
 }
 
 impl AppConfigure {
-    pub fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> Result<()> {
         // validate the profile information.
         if self.server.port == 0 {
-            anyhow::bail!("The server port cannot be 0.");
+            bail!("The server port cannot be 0.");
         }
 
         if self.database.max_connections < self.database.min_connections {
-            anyhow::bail!(
+            bail!(
                 "The maximum number of connections in the database cannot be less than the minimum number of connections."
             );
         }
 
         let valid_log_levels = ["trace", "debug", "info", "warn", "error"];
         if !valid_log_levels.contains(&self.log.level.as_str()) {
-            anyhow::bail!("Invalid log level: {}", self.log.level);
+            bail!("Invalid log level: {}", self.log.level);
         }
 
         Ok(())

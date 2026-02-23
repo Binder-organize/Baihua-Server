@@ -6,14 +6,14 @@ use tracing::info;
 
 use crate::ServerState;
 use crate::common::error::ErrorType;
-use crate::common::response::Response;
+use crate::common::response::ApiResponse;
 use crate::user::{User, UserLogin};
 
 pub async fn login(
     State(state): State<Arc<ServerState>>,
     user: Result<Json<UserLogin>, JsonRejection>,
-) -> Result<Response, ErrorType> {
-    let Json(user_login) = user.map_err(|e| ErrorType::JsonRejection(e.to_string()))?;
+) -> Result<ApiResponse, ErrorType> {
+    let Json(user_login) = user.map_err(|error| ErrorType::Json(error.to_string()))?;
 
     let user_opt = User::find_user_by_username(&user_login.username, &state.pool).await?;
     let user = user_opt
@@ -31,13 +31,13 @@ pub async fn login(
         user.id.to_string()
     );
 
-    Ok(Response::new(
+    // todo adds JWT support.
+
+    Ok(ApiResponse::new(
         StatusCode::OK,
-        json!(
-            {
-                "message": "User logged in successfully.",
-                "user": user
-            }
-        ),
+        "The user is logged in successfully.".to_string(),
+        json!({
+            "user": user
+        }),
     ))
 }

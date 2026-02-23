@@ -1,23 +1,34 @@
-use axum::Json;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::{Json, http::StatusCode, response::IntoResponse};
+use serde_json::{Value, json};
+use uuid::Uuid;
 
-pub struct Response {
-    pub status: StatusCode,
-    pub body: Json<serde_json::Value>,
+pub struct ApiResponse {
+    status: StatusCode,
+    messages: String,
+    data: Json<Value>,
+    id: String,
 }
 
-impl Response {
-    pub fn new(status: StatusCode, body: serde_json::Value) -> Self {
+impl ApiResponse {
+    pub fn new(status: StatusCode, messages: String, data: Value) -> Self {
         Self {
             status,
-            body: Json(body),
+            messages,
+            data: Json(data),
+            id: Uuid::now_v7().to_string(),
         }
     }
 }
 
-impl IntoResponse for Response {
+impl IntoResponse for ApiResponse {
     fn into_response(self) -> axum::response::Response {
-        (self.status, self.body).into_response()
+        let body = json!({
+            "id": self.id,
+            "status": self.status.as_u16(),
+            "messages": self.messages,
+            "data": *self.data,
+        });
+
+        (self.status, Json(body)).into_response()
     }
 }

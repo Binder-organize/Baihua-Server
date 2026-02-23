@@ -104,7 +104,9 @@ impl User {
             .bind(&new_user.email)
             .fetch_optional(pool)
             .await
-            .map_err(|e| ErrorType::InternalError(format!("Database query failed: {}", e)))?;
+            .map_err(|error| {
+                ErrorType::InternalError(format!("Database query failed: {}", error))
+            })?;
 
         if existing_user.is_some() {
             return Err(ErrorType::Validation(
@@ -205,13 +207,12 @@ impl User {
         pool: &sqlx::Pool<sqlx::Postgres>,
     ) -> Result<bool, ErrorType> {
         match Self::find_user_password(username, pool).await {
-            Ok(Some(hashed_password)) => verify(password, &hashed_password).map_err(|e| {
-                ErrorType::IncorrectInformation(format!("Failed to verify password: {}.", e))
-            }),
-            Ok(None) => Err(ErrorType::IncorrectInformation(
+            Ok(Some(hashed_password)) => verify(password, &hashed_password)
+                .map_err(|e| ErrorType::BadRequest(format!("Failed to verify password: {}.", e))),
+            Ok(None) => Err(ErrorType::BadRequest(
                 "Incorrect username or password.".to_string(),
             )),
-            Err(error) => Err(ErrorType::IncorrectInformation(format!(
+            Err(error) => Err(ErrorType::BadRequest(format!(
                 "Failed to find user password: {}.",
                 error
             ))),

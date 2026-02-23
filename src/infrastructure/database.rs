@@ -1,12 +1,9 @@
-use crate::common::error::ErrorType;
+use anyhow::{Context, Result};
 use dotenvy::dotenv;
 use sqlx::{Pool, Postgres, query};
-use tracing::{error, info};
-pub async fn get_pool() -> Result<Pool<Postgres>, ErrorType> {
-    dotenv().map_err(|e| {
-        error!("Failed to load .env file: {}", e);
-        ErrorType::InternalError("Environment configuration error".to_string())
-    })?;
+
+pub async fn get_pool() -> Result<Pool<Postgres>> {
+    dotenv().context("Failed to load .env file")?;
 
     let user = dotenvy::var("POSTGRES_USER").unwrap_or_else(|_| "user".to_string());
     let password = dotenvy::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "password".to_string());
@@ -19,13 +16,10 @@ pub async fn get_pool() -> Result<Pool<Postgres>, ErrorType> {
         .max_connections(5)
         .connect(&url)
         .await
-        .map_err(|e| {
-            error!("Failed to connect to database: {}.", e);
-            ErrorType::InternalError("Failed to connect to database.".to_string())
-        })
+        .context("Failed to connect to database.")
 }
 
-pub async fn initialize_database(pool: &Pool<Postgres>) -> Result<(), ErrorType> {
+pub async fn initialize_database(pool: &Pool<Postgres>) -> Result<()> {
     query(
         r#"
         CREATE TABLE IF NOT EXISTS users (
@@ -42,12 +36,7 @@ pub async fn initialize_database(pool: &Pool<Postgres>) -> Result<(), ErrorType>
     )
     .execute(pool)
     .await
-    .map_err(|e| {
-        error!("Failed to create users table: {}.", e);
-        ErrorType::InternalError("Failed to create users table.".to_string())
-    })?;
-
-    info!("Database tables initialized successfully.");
+    .context("Failed to create users table.")?;
 
     Ok(())
 }

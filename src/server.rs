@@ -1,6 +1,7 @@
 use crate::ServerState;
 use crate::console::CommandType;
 use crate::greet::greet;
+use crate::middleware;
 use axum::Router;
 use axum::routing::get;
 use std::sync::Arc;
@@ -14,9 +15,14 @@ pub async fn server(
 
     let state = Arc::new(state);
 
+    // todo Add flow control to the API.
     let app = Router::new()
         .route("/greet", get(greet))
-        .nest("/api/v1", api_v1(state.clone()));
+        .nest("/api/v1", api_v1(state.clone()))
+        .layer(axum::middleware::from_fn(middleware::tracing::tracing)) // Track requests.
+        .layer(axum::middleware::from_fn(middleware::security::security)) // Security.
+        .layer(axum::middleware::from_fn(middleware::error::panic)) // Handle panic.
+        .layer(axum::middleware::from_fn(middleware::error::not_found)); // Handle 404.
 
     // read IP addresses.
     let address = format!(
