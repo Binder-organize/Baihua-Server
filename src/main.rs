@@ -7,6 +7,7 @@ mod infrastructure;
 mod middleware;
 mod server;
 mod user;
+mod authenticate;
 
 use anyhow::Result;
 use infrastructure::config::AppConfigure;

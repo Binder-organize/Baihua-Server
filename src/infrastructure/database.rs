@@ -5,6 +5,7 @@ use sqlx::{Pool, Postgres, query};
 pub async fn get_pool() -> Result<Pool<Postgres>> {
     dotenv().context("Failed to load .env file")?;
 
+    // todo Centralize reads of environment variables into a separate module and do it when the server is initialized.
     let user = dotenvy::var("POSTGRES_USER").unwrap_or_else(|_| "user".to_string());
     let password = dotenvy::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "password".to_string());
     let host = dotenvy::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string());

@@ -90,6 +90,7 @@ impl UserRegister {
     }
 }
 
+// todo Some methods can be made into functions independently.
 impl User {
     pub async fn new(
         new_user: UserRegister,
@@ -208,7 +209,7 @@ impl User {
     ) -> Result<bool, ErrorType> {
         match Self::find_user_password(username, pool).await {
             Ok(Some(hashed_password)) => verify(password, &hashed_password)
-                .map_err(|e| ErrorType::BadRequest(format!("Failed to verify password: {}.", e))),
+                .map_err(|error| ErrorType::BadRequest(format!("Failed to verify password: {}.", error))),
             Ok(None) => Err(ErrorType::BadRequest(
                 "Incorrect username or password.".to_string(),
             )),
