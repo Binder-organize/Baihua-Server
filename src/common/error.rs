@@ -1,20 +1,12 @@
+use crate::common::{ApiResponse, StandardResponse};
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Serialize;
 use thiserror::Error;
 use tracing::{info, warn};
-use uuid::Uuid;
-
-#[derive(Serialize)]
-pub struct ApiError {
-    pub code: String,
-    pub message: String,
-    pub uuid: String,
-}
 
 #[derive(Error, Debug)]
-pub enum ErrorType {
+pub enum ErrorResponse {
     #[error("Invalid JSON format: {0}")]
     Json(String),
 
@@ -37,16 +29,16 @@ pub enum ErrorType {
     Forbidden(String),
 }
 
-impl ErrorType {
+impl ErrorResponse {
     // Get HTTP status code.
     pub fn status_code(&self) -> StatusCode {
         match self {
-            ErrorType::Json(_) => StatusCode::BAD_REQUEST,
-            ErrorType::Validation(_) => StatusCode::BAD_REQUEST,
-            ErrorType::BadRequest(_) => StatusCode::BAD_REQUEST,
-            ErrorType::Authentication(_) => StatusCode::UNAUTHORIZED,
-            ErrorType::Forbidden(_) => StatusCode::FORBIDDEN,
-            ErrorType::Database(_) | ErrorType::InternalError(_) => {
+            ErrorResponse::Json(_) => StatusCode::BAD_REQUEST,
+            ErrorResponse::Validation(_) => StatusCode::BAD_REQUEST,
+            ErrorResponse::BadRequest(_) => StatusCode::BAD_REQUEST,
+            ErrorResponse::Authentication(_) => StatusCode::UNAUTHORIZED,
+            ErrorResponse::Forbidden(_) => StatusCode::FORBIDDEN,
+            ErrorResponse::Database(_) | ErrorResponse::InternalError(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
         }
@@ -55,51 +47,56 @@ impl ErrorType {
     // Get error code.
     fn error_code(&self) -> &'static str {
         match self {
-            ErrorType::Authentication(_) => "AUTHENTICATION_ERROR",
-            ErrorType::Forbidden(_) => "FORBIDDEN_ERROR",
-            ErrorType::Json(_) => "INVALID_JSON_ERROR",
-            ErrorType::Validation(_) => "VALIDATION_ERROR",
-            ErrorType::InternalError(_) => "INTERNAL_SERVER_ERROR",
-            ErrorType::BadRequest(_) => "BAD_REQUEST_ERROR",
-            ErrorType::Database(_) => "DATABASE_ERROR",
+            ErrorResponse::Authentication(_) => "AUTHENTICATION_ERROR",
+            ErrorResponse::Forbidden(_) => "FORBIDDEN_ERROR",
+            ErrorResponse::Json(_) => "INVALID_JSON_ERROR",
+            ErrorResponse::Validation(_) => "VALIDATION_ERROR",
+            ErrorResponse::InternalError(_) => "INTERNAL_SERVER_ERROR",
+            ErrorResponse::BadRequest(_) => "BAD_REQUEST_ERROR",
+            ErrorResponse::Database(_) => "DATABASE_ERROR",
         }
     }
 }
 
-impl IntoResponse for ErrorType {
+impl ApiResponse for ErrorResponse {
+    fn to_response(self) -> StandardResponse {
+        StandardResponse::error(
+            self.status_code(),
+            self.error_code().to_string(),
+            self.to_string(),
+        )
+    }
+}
+
+impl IntoResponse for ErrorResponse {
     fn into_response(self) -> Response {
-        let status = self.status_code();
-        let error_response = ApiError {
-            code: self.error_code().to_string(),
-            message: self.to_string(),
-            uuid: Uuid::now_v7().to_string(),
-        };
+        let response = self.to_response();
 
         // Log error.
-        if status == StatusCode::INTERNAL_SERVER_ERROR {
+        if response.status.is_server_error() {
             warn!(
                 "The server returns a error: HTTP status code: 'INTERNAL_SERVER_ERROR', error code: '{}', message: '{}', ID: '{}'.",
-                self.error_code(),
-                error_response.message,
-                error_response.uuid
+                response.response.error_code,
+                response.response.message,
+                response.response.response_id
             );
         } else {
             info!(
                 "The server returns a error: HTTP status code: '{}', error code: '{}', message: '{}', ID: '{}'.",
-                status,
-                self.error_code(),
-                error_response.message,
-                error_response.uuid
+                response.status,
+                response.response.error_code,
+                response.response.message,
+                response.response.response_id
             );
         }
 
-        (status, Json(error_response)).into_response()
+        (response.status, Json(response.response)).into_response()
     }
 }
 
 // Error type is converted to Response.
-impl From<ErrorType> for Response {
-    fn from(error: ErrorType) -> Self {
+impl From<ErrorResponse> for Response {
+    fn from(error: ErrorResponse) -> Self {
         error.into_response()
     }
 }

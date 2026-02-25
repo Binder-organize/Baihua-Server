@@ -1,6 +1,6 @@
 use crate::ServerState;
-use crate::common::error::ErrorType;
-use crate::common::response::ApiResponse;
+use crate::common::error::ErrorResponse;
+use crate::common::success::SuccessResponse;
 use crate::user::{User, UserRegister};
 use axum::extract::State;
 use axum::{Json, extract::rejection::JsonRejection, http::StatusCode};
@@ -10,13 +10,13 @@ use std::sync::Arc;
 pub async fn register(
     State(state): State<Arc<ServerState>>,
     user: Result<Json<UserRegister>, JsonRejection>,
-) -> Result<ApiResponse, ErrorType> {
+) -> Result<SuccessResponse, ErrorResponse> {
     // Parse JSON and extract user data.
-    let Json(new_user) = user.map_err(|error| ErrorType::Json(error.to_string()))?;
+    let Json(new_user) = user.map_err(|error| ErrorResponse::Json(error.to_string()))?;
 
     let user_created = User::new(new_user, &state.pool).await?;
 
-    Ok(ApiResponse::new(
+    Ok(SuccessResponse::new(
         StatusCode::CREATED,
         "User created successfully".to_string(),
         json!({

@@ -1,4 +1,4 @@
-use crate::common::error::ApiError;
+use crate::common::StandardResponse;
 use axum::{
     Json,
     extract::Request,
@@ -7,7 +7,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tracing::error;
-use uuid::Uuid;
 
 // Panic error handler.
 // Theoretically, the business logic layer should not throw a panic.
@@ -17,16 +16,18 @@ pub async fn panic(request: Request, next: Next) -> Response {
     match result {
         Ok(response) => response.await,
         Err(_) => {
-            let error = ApiError {
-                code: "SERVER_CRASHES".to_string(),
-                message: "An unexpected error occurred.".to_string(),
-                uuid: Uuid::now_v7().to_string(),
-            };
+            let error = StandardResponse::error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "SERVER_CRASHES".to_string(),
+                "The server encountered an error.".to_string(),
+            );
+
             error!(
                 "The server used 'panic!', returned an 'HTTP 500' error, ID: {}",
-                error.uuid
+                error.response.response_id
             );
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(error)).into_response()
+
+            (error.status, Json(error.response)).into_response()
         }
     }
 }
@@ -36,12 +37,13 @@ pub async fn not_found(request: Request, next: Next) -> Response {
     let response = next.run(request).await;
 
     if response.status() == StatusCode::NOT_FOUND {
-        let error = ApiError {
-            code: "NOT_FOUND_ERROR".to_string(),
-            message: "The requested resource was not found.".to_string(),
-            uuid: Uuid::now_v7().to_string(),
-        };
-        return (StatusCode::NOT_FOUND, Json(error)).into_response();
+        let error = StandardResponse::error(
+            StatusCode::NOT_FOUND,
+            "NOT_FOUND_ERROR".to_string(),
+            "The requested resource was not found.".to_string(),
+        );
+
+        return (error.status, Json(error.response)).into_response();
     }
 
     response

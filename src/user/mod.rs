@@ -2,7 +2,7 @@ mod login;
 mod register;
 
 use crate::ServerState;
-use crate::common::error::ErrorType;
+use crate::common::error::ErrorResponse;
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
@@ -45,7 +45,7 @@ pub struct UserLogin {
 }
 
 impl UserRegister {
-    pub async fn validate(&self) -> Result<(), ErrorType> {
+    pub async fn validate(&self) -> Result<(), ErrorResponse> {
         // Validate the regular expression of the mailbox.
         lazy_static! {
             static ref EMAIL_REGEX: Result<Regex, String> = Regex::new(
@@ -55,7 +55,7 @@ impl UserRegister {
 
         // Validate username, email, and password.
         if self.username.is_empty() || self.email.is_empty() || self.password.is_empty() {
-            return Err(ErrorType::Validation(
+            return Err(ErrorResponse::Validation(
                 "Username, email, and password cannot be empty.".to_string(),
             ));
         }
@@ -64,14 +64,14 @@ impl UserRegister {
         match EMAIL_REGEX.as_ref() {
             Ok(regex) => {
                 if !regex.is_match(&self.email) {
-                    return Err(ErrorType::Validation(
+                    return Err(ErrorResponse::Validation(
                         "Invalid email format. Please provide a valid email address.".to_string(),
                     ));
                 }
             }
             Err(error_msg) => {
                 error!("Regex compilation failed: {}", error_msg);
-                return Err(ErrorType::InternalError(
+                return Err(ErrorResponse::InternalError(
                     "Failed to compile email regex.".to_string(),
                 ));
             }
@@ -79,14 +79,27 @@ impl UserRegister {
 
         // Check the mailbox length.
         if self.email.len() > 254 {
-            Err(ErrorType::Validation(
+            return Err(ErrorResponse::Validation(
                 "Email address is too long (maximum 254 characters).".to_string(),
-            ))
-        } else {
-            Ok(())
+            ));
+        }
+
+        // Check username.
+        if self.username.len() <= 3 || self.username.len() >= 40 {
+            return Err(ErrorResponse::Validation(
+                "Username must be between 4 and 40 characters long.".to_string(),
+            ));
+        }
+
+        if self.username == "Gavin" || self.username == "gavin" {
+            return Err(ErrorResponse::Validation(
+                "Username cannot be 'Gavin' or 'gavin'.".to_string(),
+            ));
         }
 
         // todo Complete the email verification function.
+
+        Ok(())
     }
 }
 
@@ -95,7 +108,7 @@ impl User {
     pub async fn new(
         new_user: UserRegister,
         pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> Result<User, ErrorType> {
+    ) -> Result<User, ErrorResponse> {
         // Validate the user.
         new_user.validate().await?;
 
@@ -106,11 +119,11 @@ impl User {
             .fetch_optional(pool)
             .await
             .map_err(|error| {
-                ErrorType::InternalError(format!("Database query failed: {}", error))
+                ErrorResponse::InternalError(format!("Database query failed: {}", error))
             })?;
 
         if existing_user.is_some() {
-            return Err(ErrorType::Validation(
+            return Err(ErrorResponse::Validation(
                 "Username or email already exists.".to_string(),
             ));
         }
@@ -121,7 +134,7 @@ impl User {
 
         // Hash password.
         let password_hashed = hash(new_user.password, DEFAULT_COST)
-            .map_err(|e| ErrorType::InternalError(format!("Hash password failed: {}.", e)))?;
+            .map_err(|e| ErrorResponse::InternalError(format!("Hash password failed: {}.", e)))?;
 
         // Insert user into database.
         sqlx::query(
@@ -136,7 +149,7 @@ impl User {
         .execute(pool)
         .await
         .map_err(|e| {
-            ErrorType::InternalError(format!("Failed to insert user: {}.", e))
+            ErrorResponse::InternalError(format!("Failed to insert user: {}.", e))
         })?;
 
         info!(
@@ -159,7 +172,7 @@ impl User {
     pub async fn find_user_by_username(
         username: &str,
         pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> Result<Option<User>, ErrorType> {
+    ) -> Result<Option<User>, ErrorResponse> {
         let row = sqlx::query(
             r#"SELECT id, username, email, password, nickname, phone_number, created_at, is_active
                FROM users WHERE username = $1"#,
@@ -167,7 +180,7 @@ impl User {
         .bind(username)
         .fetch_optional(pool)
         .await
-        .map_err(|e| ErrorType::InternalError(format!("Database query failed: {}.", e)))?;
+        .map_err(|e| ErrorResponse::InternalError(format!("Database query failed: {}.", e)))?;
 
         match row {
             Some(row) => Ok(Some(User {
@@ -188,12 +201,12 @@ impl User {
     pub async fn find_user_password(
         username: &str,
         pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> Result<Option<String>, ErrorType> {
+    ) -> Result<Option<String>, ErrorResponse> {
         let row = sqlx::query("SELECT password FROM users WHERE username = $1")
             .bind(username)
             .fetch_optional(pool)
             .await
-            .map_err(|e| ErrorType::InternalError(format!("Database query failed: {}.", e)))?;
+            .map_err(|e| ErrorResponse::InternalError(format!("Database query failed: {}.", e)))?;
 
         match row {
             Some(row) => Ok(Some(row.get("password"))),
@@ -206,14 +219,15 @@ impl User {
         password: &str,
         username: &str,
         pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> Result<bool, ErrorType> {
+    ) -> Result<bool, ErrorResponse> {
         match Self::find_user_password(username, pool).await {
-            Ok(Some(hashed_password)) => verify(password, &hashed_password)
-                .map_err(|error| ErrorType::BadRequest(format!("Failed to verify password: {}.", error))),
-            Ok(None) => Err(ErrorType::BadRequest(
+            Ok(Some(hashed_password)) => verify(password, &hashed_password).map_err(|error| {
+                ErrorResponse::BadRequest(format!("Failed to verify password: {}.", error))
+            }),
+            Ok(None) => Err(ErrorResponse::BadRequest(
                 "Incorrect username or password.".to_string(),
             )),
-            Err(error) => Err(ErrorType::BadRequest(format!(
+            Err(error) => Err(ErrorResponse::BadRequest(format!(
                 "Failed to find user password: {}.",
                 error
             ))),

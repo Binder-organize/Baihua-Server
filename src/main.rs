@@ -1,5 +1,6 @@
 // Baihua Server, by Gavin Zheng on January 1, 2026.
 
+mod authenticate;
 mod common;
 mod console;
 mod greet;
@@ -7,7 +8,6 @@ mod infrastructure;
 mod middleware;
 mod server;
 mod user;
-mod authenticate;
 
 use anyhow::Result;
 use infrastructure::config::AppConfigure;

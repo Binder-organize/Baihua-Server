@@ -5,10 +5,10 @@ use crate::infrastructure::database::{get_pool, initialize_database};
 use crate::infrastructure::log;
 use anyhow::{Context, Result, anyhow};
 use dirs::home_dir;
+use jsonwebtoken::crypto::{CryptoProvider, rust_crypto::DEFAULT_PROVIDER};
 use std::path::Path;
 use tokio::fs;
 use tracing::info;
-use jsonwebtoken::crypto::{CryptoProvider, rust_crypto::DEFAULT_PROVIDER};
 
 pub async fn initialize() -> Result<(ServerState, tracing_appender::non_blocking::WorkerGuard)> {
     println!("Start initializing the server.");
@@ -35,7 +35,8 @@ pub async fn initialize() -> Result<(ServerState, tracing_appender::non_blocking
     initialize_database(&pool).await?;
     info!("Database initialized.");
 
-    CryptoProvider::install_default(&DEFAULT_PROVIDER).expect("Failed to install the default crypto provider.");
+    CryptoProvider::install_default(&DEFAULT_PROVIDER)
+        .expect("Failed to install the default crypto provider.");
 
     info!("Initialization completed.");
 

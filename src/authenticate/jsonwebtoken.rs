@@ -1,6 +1,6 @@
-use crate::common::error::ErrorType;
+use crate::common::error::ErrorResponse;
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use std::env;
 use tracing::warn;
@@ -20,8 +20,7 @@ fn get_jwt_secret() -> String {
     env::var("JWT_SECRET").unwrap_or_else(|_| "your-default-jwt-secret-key".to_string())
 }
 
-pub async fn generate_token(user_id: &str) -> Result<String, ErrorType> {
-
+pub async fn generate_token(user_id: &str) -> Result<String, ErrorResponse> {
     let secret = get_jwt_secret();
 
     let expiration = Utc::now()
@@ -29,7 +28,7 @@ pub async fn generate_token(user_id: &str) -> Result<String, ErrorType> {
         .checked_add_signed(Duration::hours(24))
         .ok_or_else(|| {
             warn!("Error calculating token expiration time.");
-            ErrorType::InternalError("Failed to calculate token expiration time.".to_string())
+            ErrorResponse::InternalError("Failed to calculate token expiration time.".to_string())
         })?
         .timestamp();
 
@@ -44,13 +43,13 @@ pub async fn generate_token(user_id: &str) -> Result<String, ErrorType> {
         &claims,
         &EncodingKey::from_secret(secret.as_ref()),
     )
-        .map_err(|error| {
-            warn!("Error generating token: {:?}.", error);
-            ErrorType::InternalError(format!("Failed to generate token: {}.", error))
-        })
+    .map_err(|error| {
+        warn!("Error generating token: {:?}.", error);
+        ErrorResponse::InternalError(format!("Failed to generate token: {}.", error))
+    })
 }
 
-pub fn validate_jwt_token(token: &str) -> Result<Claims, ErrorType> {
+pub fn validate_jwt_token(token: &str) -> Result<Claims, ErrorResponse> {
     let secret = get_jwt_secret();
 
     decode::<Claims>(
@@ -58,26 +57,26 @@ pub fn validate_jwt_token(token: &str) -> Result<Claims, ErrorType> {
         &DecodingKey::from_secret(secret.as_ref()),
         &Validation::default(),
     )
-        .map(|token_data| token_data.claims)
-        .map_err(|error| ErrorType::Authentication(format!("Invalid or expired token: {}.", error)))
+    .map(|token_data| token_data.claims)
+    .map_err(|error| ErrorResponse::Authentication(format!("Invalid or expired token: {}.", error)))
 }
 
-pub fn extract_token_from_header(auth_header: &str) -> Result<&str, ErrorType> {
+pub fn extract_token_from_header(auth_header: &str) -> Result<&str, ErrorResponse> {
     if auth_header.is_empty() {
-        return Err(ErrorType::Authentication(
+        return Err(ErrorResponse::Authentication(
             "Authorization header is missing.".to_string(),
         ));
     }
 
     if !auth_header.starts_with("Bearer ") {
-        return Err(ErrorType::Authentication(
+        return Err(ErrorResponse::Authentication(
             "Authorization header must start with 'Bearer '.".to_string(),
         ));
     }
 
     let token = auth_header.trim_start_matches("Bearer ");
     if token.is_empty() {
-        return Err(ErrorType::Authentication(
+        return Err(ErrorResponse::Authentication(
             "Token is missing in Authorization header.".to_string(),
         ));
     }

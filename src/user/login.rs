@@ -5,23 +5,24 @@ use std::sync::Arc;
 use tracing::info;
 
 use crate::ServerState;
-use crate::common::error::ErrorType;
-use crate::common::response::ApiResponse;
-use crate::user::{User, UserLogin};
 use crate::authenticate::jsonwebtoken::generate_token;
+use crate::common::error::ErrorResponse;
+use crate::common::success::SuccessResponse;
+use crate::user::{User, UserLogin};
 
 pub async fn login(
     State(state): State<Arc<ServerState>>,
     user: Result<Json<UserLogin>, JsonRejection>,
-) -> Result<ApiResponse, ErrorType> {
-    let Json(user_login) = user.map_err(|error| ErrorType::Json(error.to_string()))?;
+) -> Result<SuccessResponse, ErrorResponse> {
+    let Json(user_login) = user.map_err(|error| ErrorResponse::Json(error.to_string()))?;
 
     let user_output = User::find_user_by_username(&user_login.username, &state.pool).await?;
-    let user = user_output
-        .ok_or_else(|| ErrorType::Authentication("Invalid username or password.".to_string()))?;
+    let user = user_output.ok_or_else(|| {
+        ErrorResponse::Authentication("Invalid username or password.".to_string())
+    })?;
 
     if !User::verify_password(&(user_login.password), &(user_login.username), &state.pool).await? {
-        return Err(ErrorType::Authentication(
+        return Err(ErrorResponse::Authentication(
             "Invalid username or password.".to_string(),
         ));
     }
@@ -36,12 +37,12 @@ pub async fn login(
         token
     );
 
-    Ok(ApiResponse::new(
+    Ok(SuccessResponse::new(
         StatusCode::OK,
-        "The user is logged in successfully.".to_string(),
+        "User logged in successfully.".to_string(),
         json!({
+            "token": token,
             "user": user,
-            "token": token
         }),
     ))
 }
