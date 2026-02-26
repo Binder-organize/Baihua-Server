@@ -6,6 +6,7 @@ pub struct AppConfigure {
     pub server: ServerConfigure,
     pub log: LogConfigure,
     pub database: DatabaseConfigure,
+    pub user: UserConfigure,
 }
 
 // Server configuration
@@ -34,6 +35,18 @@ pub struct DatabaseConfigure {
     pub min_connections: u32, // default: 5
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserConfigure {
+    #[serde(default = "default_username_length")]
+    pub minimum_username_length: u32, // default: 3
+
+    #[serde(default = "default_maximum_username_length")]
+    pub maximum_username_length: u32, // default: 40
+
+    #[serde(default = "default_jsonwebtoken_expiration_hours")]
+    pub jsonwebtoken_expiration_hours: u32, // default: 24
+}
+
 // Default value function
 fn default_log_level() -> String {
     "info".to_string()
@@ -43,6 +56,16 @@ fn default_max_connections() -> u32 {
 }
 fn default_min_connections() -> u32 {
     5
+}
+
+fn default_username_length() -> u32 {
+    3
+}
+fn default_maximum_username_length() -> u32 {
+    40
+}
+fn default_jsonwebtoken_expiration_hours() -> u32 {
+    24
 }
 
 impl Default for AppConfigure {
@@ -59,6 +82,11 @@ impl Default for AppConfigure {
                 url: "postgres://localhost/baihua".to_string(),
                 max_connections: default_max_connections(),
                 min_connections: default_min_connections(),
+            },
+            user: UserConfigure {
+                minimum_username_length: default_username_length(),
+                maximum_username_length: default_maximum_username_length(),
+                jsonwebtoken_expiration_hours: default_jsonwebtoken_expiration_hours(),
             },
         }
     }
@@ -80,6 +108,20 @@ impl AppConfigure {
         let valid_log_levels = ["trace", "debug", "info", "warn", "error"];
         if !valid_log_levels.contains(&self.log.level.as_str()) {
             bail!("Invalid log level: {}", self.log.level);
+        }
+
+        if self.user.minimum_username_length > self.user.maximum_username_length {
+            bail!(
+                "The minimum username length cannot be greater than the maximum username length."
+            );
+        }
+
+        if self.user.minimum_username_length == 0 || self.user.maximum_username_length == 0 {
+            bail!("The minimum or maximum value of the username length cannot be 0.");
+        }
+
+        if self.user.jsonwebtoken_expiration_hours == 0 {
+            bail!("The jsonwebtoken expiration hours cannot be 0.");
         }
 
         Ok(())

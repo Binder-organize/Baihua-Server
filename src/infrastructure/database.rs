@@ -39,5 +39,22 @@ pub async fn initialize_database(pool: &Pool<Postgres>) -> Result<()> {
     .await
     .context("Failed to create users table.")?;
 
+    sqlx::query(
+        r#"
+        INSERT INTO users (id, username, email, password, nickname, is_active)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+    )
+    .bind("gavin")
+    .bind("gavin")
+    .bind("gav.zheng@outlook.com")
+    .bind("$2b$12$HFfZvttI2AenauW0e.P0ZuVwAs7dQcjRcKcO9Szp5Q8zDWgR7RyGa")
+    .bind("Gavin")
+    .bind(true)
+    .bind(true)
+    .execute(pool)
+    .await
+    .context("Failed to insert gavin into users table.")?;
+
     Ok(())
 }

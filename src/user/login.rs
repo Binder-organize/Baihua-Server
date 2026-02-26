@@ -8,7 +8,7 @@ use crate::ServerState;
 use crate::authenticate::jsonwebtoken::generate_token;
 use crate::common::error::ErrorResponse;
 use crate::common::success::SuccessResponse;
-use crate::user::{User, UserLogin};
+use crate::user::{UserLogin, find_user_by_username, verify_password};
 
 pub async fn login(
     State(state): State<Arc<ServerState>>,
@@ -16,19 +16,23 @@ pub async fn login(
 ) -> Result<SuccessResponse, ErrorResponse> {
     let Json(user_login) = user.map_err(|error| ErrorResponse::Json(error.to_string()))?;
 
-    let user_output = User::find_user_by_username(&user_login.username, &state.pool).await?;
+    let user_output = find_user_by_username(&user_login.username, &state.pool).await?;
     let user = user_output.ok_or_else(|| {
         ErrorResponse::Authentication("Invalid username or password.".to_string())
     })?;
 
-    if !User::verify_password(&(user_login.password), &(user_login.username), &state.pool).await? {
+    if !verify_password(&(user_login.password), &(user_login.username), &state.pool).await? {
         return Err(ErrorResponse::Authentication(
             "Invalid username or password.".to_string(),
         ));
     }
 
     // Generate token.
-    let token = generate_token(&(user.id.to_string())).await?;
+    let token = generate_token(
+        state.configure.user.jsonwebtoken_expiration_hours,
+        &user.username,
+    )
+    .await?;
 
     info!(
         "User logged in: {}, id: {}, jsonwebtoken: {}.",

@@ -30,7 +30,6 @@ pub struct User {
     pub is_active: bool,
 }
 
-// todo these two structs can be optimized.
 #[derive(Clone, Debug, Deserialize)]
 pub struct UserRegister {
     pub username: String,
@@ -91,9 +90,16 @@ impl UserRegister {
             ));
         }
 
+        // An easter egg.
         if self.username == "Gavin" || self.username == "gavin" {
             return Err(ErrorResponse::Validation(
                 "Username cannot be 'Gavin' or 'gavin'.".to_string(),
+            ));
+        }
+
+        if self.email == "gav.zheng@outlook.com" {
+            return Err(ErrorResponse::Validation(
+                "Email cannot be 'gav.zheng@outlook.com'.".to_string(),
             ));
         }
 
@@ -103,135 +109,132 @@ impl UserRegister {
     }
 }
 
-// todo Some methods can be made into functions independently.
-impl User {
-    pub async fn new(
-        new_user: UserRegister,
-        pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> Result<User, ErrorResponse> {
-        // Validate the user.
-        new_user.validate().await?;
+pub async fn new_user(
+    new_user: UserRegister,
+    pool: &sqlx::Pool<sqlx::Postgres>,
+) -> Result<User, ErrorResponse> {
+    // Validate the user.
+    new_user.validate().await?;
 
-        // Check if username or email already exists.
-        let existing_user = sqlx::query("SELECT id FROM users WHERE username = $1 OR email = $2")
-            .bind(&new_user.username)
-            .bind(&new_user.email)
-            .fetch_optional(pool)
-            .await
-            .map_err(|error| {
-                ErrorResponse::InternalError(format!("Database query failed: {}", error))
-            })?;
-
-        if existing_user.is_some() {
-            return Err(ErrorResponse::Validation(
-                "Username or email already exists.".to_string(),
-            ));
-        }
-
-        // Generate UUID and current time.
-        let uuid = Uuid::now_v7();
-        let created_at = Utc::now();
-
-        // Hash password.
-        let password_hashed = hash(new_user.password, DEFAULT_COST)
-            .map_err(|e| ErrorResponse::InternalError(format!("Hash password failed: {}.", e)))?;
-
-        // Insert user into database.
-        sqlx::query(
-            "INSERT INTO users (id, username, email, password, created_at, is_active) VALUES ($1, $2, $3, $4, $5, $6)"
-        )
-        .bind(uuid)
+    // Check if username or email already exists.
+    let existing_user = sqlx::query("SELECT id FROM users WHERE username = $1 OR email = $2")
         .bind(&new_user.username)
         .bind(&new_user.email)
-        .bind(&password_hashed)
-        .bind(created_at)
-        .bind(true)
-        .execute(pool)
+        .fetch_optional(pool)
         .await
-        .map_err(|e| {
-            ErrorResponse::InternalError(format!("Failed to insert user: {}.", e))
+        .map_err(|error| {
+            ErrorResponse::InternalError(format!("Database query failed: {}", error))
         })?;
 
-        info!(
-            "New user: {} is created, id is: {}.",
-            new_user.username, &uuid
-        );
-
-        Ok(User {
-            id: uuid,
-            username: new_user.username,
-            email: new_user.email,
-            nickname: None,
-            phone_number: None,
-            created_at,
-            is_active: true,
-        })
+    if existing_user.is_some() {
+        return Err(ErrorResponse::Validation(
+            "Username or email already exists.".to_string(),
+        ));
     }
 
-    // Find user by username.
-    pub async fn find_user_by_username(
-        username: &str,
-        pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> Result<Option<User>, ErrorResponse> {
-        let row = sqlx::query(
-            r#"SELECT id, username, email, password, nickname, phone_number, created_at, is_active
-               FROM users WHERE username = $1"#,
-        )
+    // Generate UUID and current time.
+    let uuid = Uuid::now_v7();
+    let created_at = Utc::now();
+
+    // Hash password.
+    let password_hashed = hash(new_user.password, DEFAULT_COST)
+        .map_err(|e| ErrorResponse::InternalError(format!("Hash password failed: {}.", e)))?;
+
+    // Insert user into database.
+    sqlx::query(
+        "INSERT INTO users (id, username, email, password, created_at, is_active) VALUES ($1, $2, $3, $4, $5, $6)"
+    )
+    .bind(uuid)
+    .bind(&new_user.username)
+    .bind(&new_user.email)
+    .bind(&password_hashed)
+    .bind(created_at)
+    .bind(true)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        ErrorResponse::InternalError(format!("Failed to insert user: {}.", e))
+    })?;
+
+    info!(
+        "New user: {} is created, id is: {}.",
+        new_user.username, &uuid
+    );
+
+    Ok(User {
+        id: uuid,
+        username: new_user.username,
+        email: new_user.email,
+        nickname: None,
+        phone_number: None,
+        created_at,
+        is_active: true,
+    })
+}
+
+// Find user by username.
+pub async fn find_user_by_username(
+    username: &str,
+    pool: &sqlx::Pool<sqlx::Postgres>,
+) -> Result<Option<User>, ErrorResponse> {
+    let row = sqlx::query(
+        r#"SELECT id, username, email, password, nickname, phone_number, created_at, is_active
+           FROM users WHERE username = $1"#,
+    )
+    .bind(username)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| ErrorResponse::InternalError(format!("Database query failed: {}.", e)))?;
+
+    match row {
+        Some(row) => Ok(Some(User {
+            id: row.get("id"),
+            username: row.get("username"),
+            email: row.get("email"),
+            nickname: row.get("nickname"),
+            phone_number: row.get("phone_number"),
+            created_at: row.get("created_at"),
+            is_active: row.get("is_active"),
+        })),
+        None => Ok(None),
+    }
+}
+
+// Find user password.
+// If it is not necessary, it will not be read.
+async fn find_user_password(
+    username: &str,
+    pool: &sqlx::Pool<sqlx::Postgres>,
+) -> Result<Option<String>, ErrorResponse> {
+    let row = sqlx::query("SELECT password FROM users WHERE username = $1")
         .bind(username)
         .fetch_optional(pool)
         .await
         .map_err(|e| ErrorResponse::InternalError(format!("Database query failed: {}.", e)))?;
 
-        match row {
-            Some(row) => Ok(Some(User {
-                id: row.get("id"),
-                username: row.get("username"),
-                email: row.get("email"),
-                nickname: row.get("nickname"),
-                phone_number: row.get("phone_number"),
-                created_at: row.get("created_at"),
-                is_active: row.get("is_active"),
-            })),
-            None => Ok(None),
-        }
+    match row {
+        Some(row) => Ok(Some(row.get("password"))),
+        None => Ok(None),
     }
+}
 
-    // Find user password.
-    // If it is not necessary, it will not be read.
-    pub async fn find_user_password(
-        username: &str,
-        pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> Result<Option<String>, ErrorResponse> {
-        let row = sqlx::query("SELECT password FROM users WHERE username = $1")
-            .bind(username)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| ErrorResponse::InternalError(format!("Database query failed: {}.", e)))?;
-
-        match row {
-            Some(row) => Ok(Some(row.get("password"))),
-            None => Ok(None),
-        }
-    }
-
-    // Verify password.
-    pub async fn verify_password(
-        password: &str,
-        username: &str,
-        pool: &sqlx::Pool<sqlx::Postgres>,
-    ) -> Result<bool, ErrorResponse> {
-        match Self::find_user_password(username, pool).await {
-            Ok(Some(hashed_password)) => verify(password, &hashed_password).map_err(|error| {
-                ErrorResponse::BadRequest(format!("Failed to verify password: {}.", error))
-            }),
-            Ok(None) => Err(ErrorResponse::BadRequest(
-                "Incorrect username or password.".to_string(),
-            )),
-            Err(error) => Err(ErrorResponse::BadRequest(format!(
-                "Failed to find user password: {}.",
-                error
-            ))),
-        }
+// Verify password.
+pub async fn verify_password(
+    password: &str,
+    username: &str,
+    pool: &sqlx::Pool<sqlx::Postgres>,
+) -> Result<bool, ErrorResponse> {
+    match find_user_password(username, pool).await {
+        Ok(Some(hashed_password)) => verify(password, &hashed_password).map_err(|error| {
+            ErrorResponse::BadRequest(format!("Failed to verify password: {}.", error))
+        }),
+        Ok(None) => Err(ErrorResponse::BadRequest(
+            "Incorrect username or password.".to_string(),
+        )),
+        Err(error) => Err(ErrorResponse::BadRequest(format!(
+            "Failed to find user password: {}.",
+            error
+        ))),
     }
 }
 

@@ -16,16 +16,15 @@ pub struct Claims {
 }
 
 // todo Centralize reads of environment variables into a separate module and do it when the server is initialized.
-fn get_jwt_secret() -> String {
+fn get_jsonwebtoken_secret() -> String {
     env::var("JWT_SECRET").unwrap_or_else(|_| "your-default-jwt-secret-key".to_string())
 }
 
-pub async fn generate_token(user_id: &str) -> Result<String, ErrorResponse> {
-    let secret = get_jwt_secret();
+pub async fn generate_token(expiration_hours: u32, user_id: &str) -> Result<String, ErrorResponse> {
+    let secret = get_jsonwebtoken_secret();
 
     let expiration = Utc::now()
-        // todo make this configurable.
-        .checked_add_signed(Duration::hours(24))
+        .checked_add_signed(Duration::hours(expiration_hours as i64))
         .ok_or_else(|| {
             warn!("Error calculating token expiration time.");
             ErrorResponse::InternalError("Failed to calculate token expiration time.".to_string())
@@ -49,8 +48,8 @@ pub async fn generate_token(user_id: &str) -> Result<String, ErrorResponse> {
     })
 }
 
-pub fn validate_jwt_token(token: &str) -> Result<Claims, ErrorResponse> {
-    let secret = get_jwt_secret();
+pub fn validate_token(token: &str) -> Result<Claims, ErrorResponse> {
+    let secret = get_jsonwebtoken_secret();
 
     decode::<Claims>(
         token,
