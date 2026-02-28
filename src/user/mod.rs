@@ -1,7 +1,7 @@
 mod login;
 mod register;
 
-use crate::ServerState;
+use crate::{middleware, ServerState};
 use crate::common::error::ErrorResponse;
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{DateTime, Utc};
@@ -231,10 +231,7 @@ pub async fn verify_password(
         Ok(None) => Err(ErrorResponse::BadRequest(
             "Incorrect username or password.".to_string(),
         )),
-        Err(error) => Err(ErrorResponse::BadRequest(format!(
-            "Failed to find user password: {}.",
-            error
-        ))),
+        Err(error) => Err(error),
     }
 }
 
@@ -242,5 +239,6 @@ pub fn router(state: Arc<ServerState>) -> axum::Router {
     axum::Router::new()
         .route("/register", axum::routing::post(register::register))
         .route("/login", axum::routing::post(login::login))
+        .layer(axum::middleware::from_fn(middleware::validate::validate_user))
         .with_state(state)
 }
