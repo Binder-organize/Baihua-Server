@@ -4,6 +4,7 @@ mod authenticate;
 mod common;
 mod console;
 mod greet;
+mod health;
 mod infrastructure;
 mod middleware;
 mod server;
@@ -63,35 +64,59 @@ async fn main() -> Result<()> {
     );
 
     let (command_tx, command_rx) = tokio::sync::mpsc::channel::<console::CommandType>(32);
-
-    let console_handle = tokio::spawn(console::console(command_tx));
     let server_handle = tokio::spawn(server::server(command_rx, state.clone()));
 
-    let shutdown_reason = tokio::select! {
-        reason = console_handle => {
-            match reason {
-                Ok(()) => "Console requested shutdown.",
-                Err(error) => {
-                    error!("Console task failed: {}", error);
-                    "Console task failed"
+    let shutdown_reason = if state.environment.is_development() {
+        let console_handle = tokio::spawn(console::console(command_tx));
+
+        tokio::select! {
+            reason = console_handle => {
+                match reason {
+                    Ok(()) => "Console requested shutdown.",
+                    Err(error) => {
+                        error!("Console task failed: {}", error);
+                        "Console task failed"
+                    }
                 }
             }
-        }
-        reason = server_handle => {
-            match reason {
-                Ok(Ok(())) => "Server completed successfully.",
-                Ok(Err(error)) => {
-                    error!("Server task failed: {}.", error);
-                    "Server task failed."
-                }
-                Err(error) => {
-                    error!("Server task panicked: {}.", error);
-                    "Server task panicked."
+            reason = server_handle => {
+                match reason {
+                    Ok(Ok(())) => "Server completed successfully.",
+                    Ok(Err(error)) => {
+                        error!("Server task failed: {}.", error);
+                        "Server task failed."
+                    }
+                    Err(error) => {
+                        error!("Server task panicked: {}.", error);
+                        "Server task panicked."
+                    }
                 }
             }
+            _ = shutdown_signal() => {
+                "Received shutdown signal."
+            }
         }
-        _ = tokio::signal::ctrl_c() => {
-            "Received interrupt signal (Ctrl-C)."
+    } else {
+        info!("Console disabled in production mode.");
+        let _command_tx = command_tx;
+
+        tokio::select! {
+            reason = server_handle => {
+                match reason {
+                    Ok(Ok(())) => "Server completed successfully.",
+                    Ok(Err(error)) => {
+                        error!("Server task failed: {}.", error);
+                        "Server task failed."
+                    }
+                    Err(error) => {
+                        error!("Server task panicked: {}.", error);
+                        "Server task panicked."
+                    }
+                }
+            }
+            _ = shutdown_signal() => {
+                "Received shutdown signal."
+            }
         }
     };
 
@@ -104,4 +129,27 @@ async fn main() -> Result<()> {
     println!("Goodbye!");
 
     Ok(())
+}
+
+// Waits for either SIGINT or SIGTERM (Unix) or Ctrl-C (Windows).
+pub(crate) async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigint = signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler.");
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler.");
+
+        tokio::select! {
+            _ = sigint.recv() => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to listen for Ctrl-C.");
+    }
 }

@@ -21,9 +21,11 @@ pub async fn initialize(
         println!("Start initializing the server.");
     }
 
-    // Get the user home directory.
+    // Determine the application directory.
     let home = home_dir().context("The user home directory cannot be obtained.")?;
-    let app_directory = home.join(".baihua");
+    let app_directory = std::env::var("BAIHUA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| home.join(".baihua"));
 
     create_app_directories(&app_directory, env).await?;
 
@@ -37,7 +39,7 @@ pub async fn initialize(
     };
 
     let guard = log::init_log(&directory, &configuration, env)
-        .map_err(|e| anyhow!("Failed to initialize logging system: {}.", e))?;
+        .map_err(|error| anyhow!("Failed to initialize logging system: {}.", error))?;
 
     let pool = get_pool(env, &configuration.database).await?;
 

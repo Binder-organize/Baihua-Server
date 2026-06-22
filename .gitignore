@@ -3,7 +3,7 @@
 .vscode
 
 # Rust
-cargo.lock
+Cargo.lock
 debug
 target
 **/*.rs.bk

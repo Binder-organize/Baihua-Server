@@ -26,10 +26,11 @@ pub struct LogConfigure {
 }
 
 // Database configuration
+// Connection details are provided via environment variables to avoid
+// hardcoding credentials in config files. See .env.example for the
+// required POSTGRES_* variables.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseConfigure {
-    pub url: String,
-
     #[serde(default = "default_max_connections")]
     pub max_connections: u32, // default: 20
 
@@ -81,7 +82,6 @@ impl Default for AppConfigure {
                 level: default_log_level(),
             },
             database: DatabaseConfigure {
-                url: "postgres://localhost/baihua".to_string(),
                 max_connections: default_max_connections(),
                 min_connections: default_min_connections(),
             },

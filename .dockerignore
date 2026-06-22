@@ -1,0 +1,26 @@
+# Build artifacts
+target/
+
+# Version control
+.git/
+.gitignore
+.dockerignore
+
+# Environment (do not bake secrets into the image)
+.env
+.env.example
+
+# Docs (not needed at runtime)
+*.md
+docs/
+
+# IDE config
+.idea/
+.vscode/
+
+# macOS metadata
+.DS_Store
+
+# AI agent config
+.comate
+AGENTS.md

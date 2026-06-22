@@ -11,6 +11,31 @@ services:
     volumes:
       - data:/var/lib/postgresql
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  server:
+    profiles:
+      - production
+    build: .
+    container_name: baihua-server
+    ports:
+      - "2424:2424"
+    environment:
+      BAIHUA_ENV: production
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in production}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
 
 volumes:
   data:

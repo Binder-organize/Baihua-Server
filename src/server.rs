@@ -1,6 +1,7 @@
 use crate::ServerState;
 use crate::console::CommandType;
 use crate::greet::greet;
+use crate::health::health_check;
 use crate::middleware;
 use axum::Router;
 use axum::routing::get;
@@ -17,10 +18,12 @@ pub async fn server(
 
     let app = Router::new()
         .route("/greet", get(greet))
+        .route("/health", get(health_check))
         .nest("/api/v1", api_v1(state.clone()))
-        .layer(axum::middleware::from_fn(middleware::tracing::tracing)) // Track requests.
-        .layer(axum::middleware::from_fn(middleware::error::panic)) // Handle panic.
-        .layer(axum::middleware::from_fn(middleware::error::not_found)); // Handle 404.
+        .layer(axum::middleware::from_fn(middleware::tracing::tracing))
+        .layer(axum::middleware::from_fn(middleware::error::panic))
+        .layer(axum::middleware::from_fn(middleware::error::not_found))
+        .with_state(state.clone());
 
     // read IP addresses.
     let address = format!(
@@ -29,7 +32,7 @@ pub async fn server(
     );
     let listener = tokio::net::TcpListener::bind(&address).await?;
 
-    // Setup graceful shutdown handler
+    // Setup graceful shutdown handler (SIGINT + SIGTERM)
     let shutdown_handler = async move {
         tokio::select! {
             command = command_rx.recv() => {
@@ -42,8 +45,8 @@ pub async fn server(
                     }
                 }
             }
-            _ = tokio::signal::ctrl_c() => {
-                info!("Received Ctrl+C signal.");
+            _ = crate::shutdown_signal() => {
+                info!("Received OS shutdown signal.");
             }
         }
     };
@@ -57,6 +60,6 @@ pub async fn server(
     Ok(())
 }
 
-fn api_v1(state: Arc<ServerState>) -> Router {
+fn api_v1(state: Arc<ServerState>) -> Router<Arc<ServerState>> {
     Router::new().nest("/user", crate::user::router(state))
 }
