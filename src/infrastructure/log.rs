@@ -1,9 +1,10 @@
 use crate::Directory;
 use crate::infrastructure::config::AppConfigure;
+use crate::infrastructure::environment::Environment;
 use tracing::subscriber::set_global_default;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{
-    EnvFilter,
+    EnvFilter, Layer,
     fmt::{self, format::FmtSpan},
     layer::SubscriberExt,
 };
@@ -11,6 +12,7 @@ use tracing_subscriber::{
 pub fn init_log(
     directory: &Directory,
     configure: &AppConfigure,
+    env: Environment,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard, Box<dyn std::error::Error>> {
     let logs_dir = directory.log.clone();
     let config = &configure.log;
@@ -29,16 +31,28 @@ pub fn init_log(
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.level));
 
-    // Create a console layer.
-    let console_layer = fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-        .with_level(true)
-        .with_target(true)
-        .with_thread_ids(false)
-        .with_thread_names(false);
+    // Console layer: pretty in development, compact JSON in production.
+    let console_layer = if env.is_development() {
+        fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_ansi(true)
+            .with_level(true)
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_thread_names(false)
+            .boxed()
+    } else {
+        fmt::layer()
+            .json()
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .with_level(true)
+            .with_target(true)
+            .with_thread_ids(true)
+            .boxed()
+    };
 
-    // Create a file layer based on the configuration.
+    // File layer: always JSON.
     let file_layer = fmt::layer()
         .json()
         .with_writer(non_blocking_writer)

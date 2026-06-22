@@ -2,27 +2,20 @@ use crate::common::error::ErrorResponse;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
-use std::env;
 use tracing::warn;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    // User ID
     pub sub: String,
-    // Issuance time.
     pub iat: i64,
-    // Expiration time.
     pub exp: i64,
 }
 
-// todo Centralize reads of environment variables into a separate module and do it when the server is initialized.
-fn get_jsonwebtoken_secret() -> String {
-    env::var("JWT_SECRET").unwrap_or_else(|_| "your-default-jwt-secret-key".to_string())
-}
-
-pub async fn generate_token(expiration_hours: u32, user_id: &str) -> Result<String, ErrorResponse> {
-    let secret = get_jsonwebtoken_secret();
-
+pub async fn generate_token(
+    secret: &str,
+    expiration_hours: u32,
+    user_id: &str,
+) -> Result<String, ErrorResponse> {
     let expiration = Utc::now()
         .checked_add_signed(Duration::hours(expiration_hours as i64))
         .ok_or_else(|| {
@@ -48,16 +41,17 @@ pub async fn generate_token(expiration_hours: u32, user_id: &str) -> Result<Stri
     })
 }
 
-pub fn validate_token(token: &str) -> Result<Claims, ErrorResponse> {
-    let secret = get_jsonwebtoken_secret();
-
+pub fn validate_token(token: &str, secret: &str) -> Result<Claims, ErrorResponse> {
     decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_ref()),
         &Validation::default(),
     )
     .map(|token_data| token_data.claims)
-    .map_err(|error| ErrorResponse::Authentication(format!("Invalid or expired token: {}.", error)))
+    .map_err(|error| {
+        warn!("Token validation failed: {}.", error);
+        ErrorResponse::Authentication("Invalid or expired token.".to_string())
+    })
 }
 
 pub fn extract_token_from_header(auth_header: &str) -> Result<&str, ErrorResponse> {

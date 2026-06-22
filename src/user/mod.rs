@@ -1,8 +1,8 @@
 mod login;
 mod register;
 
-use crate::{middleware, ServerState};
 use crate::common::error::ErrorResponse;
+use crate::{ServerState, middleware};
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
@@ -90,20 +90,12 @@ impl UserRegister {
             ));
         }
 
-        // An easter egg.
-        if self.username == "Gavin" || self.username == "gavin" {
-            return Err(ErrorResponse::Validation(
-                "Username cannot be 'Gavin' or 'gavin'.".to_string(),
-            ));
-        }
-
+        // Can't be mine!
         if self.email == "gav.zheng@outlook.com" {
             return Err(ErrorResponse::Validation(
                 "Email cannot be 'gav.zheng@outlook.com'.".to_string(),
             ));
         }
-
-        // todo Complete the email verification function.
 
         Ok(())
     }
@@ -123,7 +115,8 @@ pub async fn new_user(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            ErrorResponse::InternalError(format!("Database query failed: {}", error))
+            error!("Database query failed during user lookup: {}", error);
+            ErrorResponse::InternalError("Failed to check user existence.".to_string())
         })?;
 
     if existing_user.is_some() {
@@ -151,10 +144,11 @@ pub async fn new_user(
     .bind(created_at)
     .bind(true)
     .execute(pool)
-    .await
-    .map_err(|e| {
-        ErrorResponse::InternalError(format!("Failed to insert user: {}.", e))
-    })?;
+        .await
+        .map_err(|e| {
+            error!("Failed to insert user into database: {}", e);
+            ErrorResponse::InternalError("Failed to create user.".to_string())
+        })?;
 
     info!(
         "New user: {} is created, id is: {}.",
@@ -173,18 +167,22 @@ pub async fn new_user(
 }
 
 // Find user by username.
+#[allow(dead_code)]
 pub async fn find_user_by_username(
     username: &str,
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<Option<User>, ErrorResponse> {
     let row = sqlx::query(
-        r#"SELECT id, username, email, password, nickname, phone_number, created_at, is_active
+        r#"SELECT id, username, email, nickname, phone_number, created_at, is_active
            FROM users WHERE username = $1"#,
     )
     .bind(username)
     .fetch_optional(pool)
     .await
-    .map_err(|e| ErrorResponse::InternalError(format!("Database query failed: {}.", e)))?;
+    .map_err(|e| {
+        error!("Database query failed during user lookup: {}", e);
+        ErrorResponse::InternalError("Failed to query user.".to_string())
+    })?;
 
     match row {
         Some(row) => Ok(Some(User {
@@ -200,33 +198,50 @@ pub async fn find_user_by_username(
     }
 }
 
-// Find user password.
-// If it is not necessary, it will not be read.
-async fn find_user_password(
+pub async fn find_user_with_password(
     username: &str,
     pool: &sqlx::Pool<sqlx::Postgres>,
-) -> Result<Option<String>, ErrorResponse> {
-    let row = sqlx::query("SELECT password FROM users WHERE username = $1")
-        .bind(username)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| ErrorResponse::InternalError(format!("Database query failed: {}.", e)))?;
+) -> Result<Option<(User, String)>, ErrorResponse> {
+    let row = sqlx::query(
+        r#"SELECT id, username, email, password, nickname, phone_number, created_at, is_active
+           FROM users WHERE username = $1"#,
+    )
+    .bind(username)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        error!("Database query failed during user lookup: {}", e);
+        ErrorResponse::InternalError("Failed to query user.".to_string())
+    })?;
 
     match row {
-        Some(row) => Ok(Some(row.get("password"))),
+        Some(row) => {
+            let password: String = row.get("password");
+            let user = User {
+                id: row.get("id"),
+                username: row.get("username"),
+                email: row.get("email"),
+                nickname: row.get("nickname"),
+                phone_number: row.get("phone_number"),
+                created_at: row.get("created_at"),
+                is_active: row.get("is_active"),
+            };
+            Ok(Some((user, password)))
+        }
         None => Ok(None),
     }
 }
 
-// Verify password.
+#[allow(dead_code)]
 pub async fn verify_password(
     password: &str,
     username: &str,
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<bool, ErrorResponse> {
-    match find_user_password(username, pool).await {
-        Ok(Some(hashed_password)) => verify(password, &hashed_password).map_err(|error| {
-            ErrorResponse::BadRequest(format!("Failed to verify password: {}.", error))
+    match find_user_with_password(username, pool).await {
+        Ok(Some((_user, hashed_password))) => verify(password, &hashed_password).map_err(|error| {
+            error!("Password verification failed: {}", error);
+            ErrorResponse::BadRequest("Failed to verify credentials.".to_string())
         }),
         Ok(None) => Err(ErrorResponse::BadRequest(
             "Incorrect username or password.".to_string(),
@@ -239,6 +254,8 @@ pub fn router(state: Arc<ServerState>) -> axum::Router {
     axum::Router::new()
         .route("/register", axum::routing::post(register::register))
         .route("/login", axum::routing::post(login::login))
-        .layer(axum::middleware::from_fn(middleware::validate::validate_user))
+        .layer(axum::middleware::from_fn(
+            middleware::validate::validate_user,
+        ))
         .with_state(state)
 }

@@ -30,7 +30,6 @@ pub enum ErrorResponse {
 }
 
 impl ErrorResponse {
-    // Get HTTP status code.
     pub fn status_code(&self) -> StatusCode {
         match self {
             ErrorResponse::Json(_) => StatusCode::BAD_REQUEST,
@@ -44,7 +43,6 @@ impl ErrorResponse {
         }
     }
 
-    // Get error code.
     fn error_code(&self) -> &'static str {
         match self {
             ErrorResponse::Authentication(_) => "AUTHENTICATION_ERROR",
@@ -56,6 +54,23 @@ impl ErrorResponse {
             ErrorResponse::Database(_) => "DATABASE_ERROR",
         }
     }
+
+    // Message shown to the client.
+    // In production, internal and database errors return a generic message
+    // to avoid leaking implementation details.
+    fn client_message(&self) -> String {
+        let is_prod = std::env::var("BAIHUA_ENV").as_deref() == Ok("production");
+        match self {
+            ErrorResponse::InternalError(_) | ErrorResponse::Database(_) => {
+                if is_prod {
+                    "An internal error occurred. Please try again later.".to_string()
+                } else {
+                    self.to_string()
+                }
+            }
+            _ => self.to_string(),
+        }
+    }
 }
 
 impl ApiResponse for ErrorResponse {
@@ -63,7 +78,7 @@ impl ApiResponse for ErrorResponse {
         StandardResponse::error(
             self.status_code(),
             self.error_code().to_string(),
-            self.to_string(),
+            self.client_message(),
         )
     }
 }

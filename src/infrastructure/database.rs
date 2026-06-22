@@ -1,60 +1,30 @@
+use crate::infrastructure::config::DatabaseConfigure;
+use crate::infrastructure::environment::Environment;
 use anyhow::{Context, Result};
-use dotenvy::dotenv;
-use sqlx::{Pool, Postgres, query};
+use sqlx::{Pool, Postgres};
 
-pub async fn get_pool() -> Result<Pool<Postgres>> {
-    dotenv().context("Failed to load .env file")?;
+pub fn build_connection_url(env: Environment) -> Result<String> {
+    let user = env.require_var("POSTGRES_USER", "user")?;
+    let password = env.require_var("POSTGRES_PASSWORD", "password")?;
+    let host = env.var_or("POSTGRES_HOST", "localhost");
+    let port = env.var_or("POSTGRES_PORT", "2423");
+    let db = env.var_or("POSTGRES_DB", "baihua");
 
-    // todo Centralize reads of environment variables into a separate module and do it when the server is initialized.
-    let user = dotenvy::var("POSTGRES_USER").unwrap_or_else(|_| "user".to_string());
-    let password = dotenvy::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "password".to_string());
-    let host = dotenvy::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string());
-    let port = dotenvy::var("POSTGRES_PORT").unwrap_or_else(|_| "2423".to_string());
-    let db = dotenvy::var("POSTGRES_DB").unwrap_or_else(|_| "baihua".to_string());
+    Ok(format!(
+        "postgres://{}:{}@{}:{}/{}",
+        user, password, host, port, db
+    ))
+}
 
-    let url = format!("postgres://{}:{}@{}:{}/{}", user, password, host, port, db);
+pub async fn get_pool(env: Environment, config: &DatabaseConfigure) -> Result<Pool<Postgres>> {
+    let url = build_connection_url(env)?;
+
     sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(config.max_connections)
+        .min_connections(config.min_connections)
+        .idle_timeout(std::time::Duration::from_secs(600))
+        .max_lifetime(std::time::Duration::from_secs(3600))
         .connect(&url)
         .await
         .context("Failed to connect to database.")
-}
-
-pub async fn initialize_database(pool: &Pool<Postgres>) -> Result<()> {
-    query(
-        r#"
-        CREATE TABLE IF NOT EXISTS users (
-            id UUID PRIMARY KEY,
-            username TEXT NOT NULL UNIQUE,
-            email TEXT NOT NULL UNIQUE,
-            password TEXT NOT NULL,
-            nickname TEXT,
-            phone_number TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            is_active BOOLEAN NOT NULL DEFAULT true
-        )
-        "#,
-    )
-    .execute(pool)
-    .await
-    .context("Failed to create users table.")?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO users (id, username, email, password, nickname, is_active)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        "#,
-    )
-    .bind("gavin")
-    .bind("gavin")
-    .bind("gav.zheng@outlook.com")
-    .bind("$2b$12$HFfZvttI2AenauW0e.P0ZuVwAs7dQcjRcKcO9Szp5Q8zDWgR7RyGa")
-    .bind("Gavin")
-    .bind(true)
-    .bind(true)
-    .execute(pool)
-    .await
-    .context("Failed to insert gavin into users table.")?;
-
-    Ok(())
 }
