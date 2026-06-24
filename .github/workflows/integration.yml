@@ -1,0 +1,48 @@
+name: integration
+
+on:
+  push:
+    branches: [develop, main, release/**]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build and start
+        run: |
+          cat > .env.ci << 'EOF'
+          JWT_SECRET=ci-test-secret-key-not-for-production
+          POSTGRES_USER=baihua_test
+          POSTGRES_PASSWORD=test_pass
+          POSTGRES_DB=baihua_test
+          EOF
+          docker compose --profile production --env-file .env.ci up -d --build
+
+      - name: wait for health
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:2424/health > /dev/null 2>&1; then
+              echo "server is healthy"
+              exit 0
+            fi
+            echo "waiting... ($i/20)"
+            sleep 3
+          done
+          echo "server failed to start"
+          docker compose logs server
+          exit 1
+
+      - name: smoke test
+        run: curl -sf http://localhost:2424/greet
+
+      - name: container logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: cleanup
+        if: always()
+        run: docker compose --profile production down -v

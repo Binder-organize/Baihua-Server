@@ -4,12 +4,15 @@ use axum::http::HeaderMap;
 use axum::{extract::Request, middleware::Next, response::Response};
 use tracing::error;
 
+// todo remove it.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser {
     pub user_id: String,
     pub access_token: String,
 }
 
+#[allow(dead_code)]
 pub async fn authenticate(
     headers: HeaderMap,
     request: Request,
