@@ -26,7 +26,7 @@ services:
       - "2424:2424"
     environment:
       BAIHUA_ENV: production
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in production}
+      JWT_SECRET: ${JWT_SECRET}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST: db

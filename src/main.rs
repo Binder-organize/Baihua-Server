@@ -50,6 +50,7 @@ async fn main() -> Result<()> {
         }
     );
 
+    // Initialize the server.
     let (state, log_guard) = match initialize::initialize(env).await {
         Ok((server_state, guard)) => (server_state, guard),
         Err(error) => {

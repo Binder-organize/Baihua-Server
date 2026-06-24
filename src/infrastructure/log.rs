@@ -28,6 +28,7 @@ pub fn init_log(
     let (writer, guard) = tracing_appender::non_blocking(file_appender);
 
     // Set up log system.
+    // When the server runs in a development environment, enable more settings.
     if env.is_development() {
         let filter =
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.level));

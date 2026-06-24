@@ -3,7 +3,6 @@
 .vscode
 
 # Rust
-Cargo.lock
 debug
 target
 **/*.rs.bk
@@ -18,6 +17,8 @@ target
 
 # Environment
 .env
+.env.production
 
 # AI Agents
 AGENTS.md
+.omo

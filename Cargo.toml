@@ -25,4 +25,3 @@ bcrypt = "0.18.0"
 regex = "1.12.3"
 lazy_static = "1.5.0"
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["rust_crypto"] }
-hyper = "1.8.1"
