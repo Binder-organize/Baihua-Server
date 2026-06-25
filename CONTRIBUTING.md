@@ -55,14 +55,61 @@ If you are interested in Baihua's code and wish to participate directly in devel
 5.  **Commit Code**: Commit your code to the new branch and push it to `GitHub`. Regarding commit messages, please refer to the [Commit Message Convention](#commit-message-convention).
 6.  **Create a Pull Request**: Create a `Pull Request` on `GitHub` to merge your branch into Baihua's corresponding development branch.
 
-When submitting code, please try to follow these conventions:
+When submitting code, please follow these conventions **in order**:
 
-*   **Code Style**: Please use `clippy` and `cargo fmt` to format your code before committing.
-*   **Testing**: Before committing, ensure all tests pass.
-*   **Documentation**: Update relevant documentation, including files in the `/docs/` directory, the `README.md` file in the root directory, etc.
+1.  **Code Style**: Run `cargo fmt` and `cargo clippy --locked -- -D warnings` to format and lint your code.
+2.  **Integration Tests**: Run the full test suite with `python3 tests/run_tests.py`. See [Testing](#testing) below for details.
+3.  **Documentation**: Update relevant documentation, including files in the `/docs/` directory, the `README.md` file in the root directory, etc.
 
 > [!CAUTION]
 > Please be sure to follow the above rules, otherwise your code may be rejected for merging.
+
+## Testing
+
+Baihua uses **Python pytest** for HTTP integration tests against a running server. Tests live in `tests/`.
+
+### Prerequisites
+
+- **Docker** (for PostgreSQL database via `docker compose`)
+- **Python 3.10+** with `pip install -r tests/requirements.txt`
+
+### Run Tests
+
+The test runner handles the full lifecycle: build the Rust binary, start the database, launch the server, run tests, and clean up.
+
+```bash
+# Default mode (recommended): DB in Docker, server binary local
+python3 tests/run_tests.py
+
+# Full Docker mode (like CI): builds and runs everything in containers
+python3 tests/run_tests.py --docker
+
+# Local PostgreSQL mode: use an existing local PostgreSQL
+python3 tests/run_tests.py --local
+```
+
+Pre-flight checks (`cargo fmt --check` and `clippy`) run automatically. To skip them:
+
+```bash
+python3 tests/run_tests.py --skip-checks
+```
+
+To keep the server running after tests (e.g. for manual testing):
+
+```bash
+python3 tests/run_tests.py --keep
+```
+
+### CI Pipeline
+
+Two GitHub Actions workflows run on every push/PR:
+
+| Workflow | File | What it checks |
+|----------|------|----------------|
+| **check** | `.github/workflows/check.yml` | `cargo fmt --check`, `cargo check --locked`, `clippy` |
+| **integration** | `.github/workflows/integration.yml` | Full Docker build, smoke test, pytest integration tests |
+
+Both must pass before a pull request can be merged.
 
 #### Commit Message Convention
 

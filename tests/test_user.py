@@ -90,6 +90,39 @@ class TestRegister:
         assert resp.status_code == 400
         assert resp.json()["error_code"] == "VALIDATION_ERROR"
 
+    def test_empty_username_string(self, session: requests.Session, base_url: str):
+        """Should reject register with empty username string."""
+        resp = session.post(
+            f"{base_url}/api/v1/user/register",
+            json={"username": "", "email": "a@b.com", "password": "P@ssw0rd!"},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "VALIDATION_ERROR"
+        assert "username is required" in body["message"].lower()
+
+    def test_empty_email_string(self, session: requests.Session, base_url: str):
+        """Should reject register with empty email string."""
+        resp = session.post(
+            f"{base_url}/api/v1/user/register",
+            json={"username": "testuser", "email": "", "password": "P@ssw0rd!"},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "VALIDATION_ERROR"
+        assert "email is required" in body["message"].lower()
+
+    def test_empty_password_string(self, session: requests.Session, base_url: str):
+        """Should reject register with empty password string."""
+        resp = session.post(
+            f"{base_url}/api/v1/user/register",
+            json={"username": "testuser", "email": "a@b.com", "password": ""},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "VALIDATION_ERROR"
+        assert "password is required" in body["message"].lower()
+
 
 class TestLogin:
     def test_missing_username(self, session: requests.Session, base_url: str):
@@ -135,6 +168,36 @@ class TestLogin:
             f"Got {resp.status_code}: {resp.text}"
         )
 
+    def test_empty_body(self, session: requests.Session, base_url: str):
+        """Login with empty body should fail validation."""
+        resp = session.post(f"{base_url}/api/v1/user/login", json={})
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "VALIDATION_ERROR"
+        assert "username is required" in body["message"].lower()
+
+    def test_empty_username_string(self, session: requests.Session, base_url: str):
+        """Should reject login with empty username string."""
+        resp = session.post(
+            f"{base_url}/api/v1/user/login",
+            json={"username": "", "password": "somepass"},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "VALIDATION_ERROR"
+        assert "username is required" in body["message"].lower()
+
+    def test_empty_password_string(self, session: requests.Session, base_url: str):
+        """Should reject login with empty password string."""
+        resp = session.post(
+            f"{base_url}/api/v1/user/login",
+            json={"username": "someuser", "password": ""},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "VALIDATION_ERROR"
+        assert "password is required" in body["message"].lower()
+
     def test_login_wrong_credentials(self, session: requests.Session, base_url: str):
         """Should return 401 for wrong password."""
         resp = session.post(
@@ -146,6 +209,57 @@ class TestLogin:
         body = resp.json()
         assert body["error_code"] == "AUTHENTICATION_ERROR"
 
+class TestValidationMiddleware:
+    """Tests for shared middleware behavior (validate_json_body)."""
+
+    def test_register_wrong_content_type(self, session: requests.Session, base_url: str):
+        """Register with wrong Content-Type should be rejected before handler."""
+        resp = session.post(
+            f"{base_url}/api/v1/user/register",
+            data="not json",
+            headers={"Content-Type": "text/plain"},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "VALIDATION_ERROR"
+        assert "content-type" in body["message"].lower()
+
+    def test_register_invalid_json(self, session: requests.Session, base_url: str):
+        """Register with malformed JSON should be rejected."""
+        resp = session.post(
+            f"{base_url}/api/v1/user/register",
+            data="not valid json{{{",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "INVALID_JSON_ERROR"
+
+    def test_login_wrong_content_type(self, session: requests.Session, base_url: str):
+        """Login with wrong Content-Type should be rejected before handler."""
+        resp = session.post(
+            f"{base_url}/api/v1/user/login",
+            data="not json",
+            headers={"Content-Type": "text/plain"},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "VALIDATION_ERROR"
+        assert "content-type" in body["message"].lower()
+
+    def test_login_invalid_json(self, session: requests.Session, base_url: str):
+        """Login with malformed JSON should be rejected."""
+        resp = session.post(
+            f"{base_url}/api/v1/user/login",
+            data="not valid json{{{",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error_code"] == "INVALID_JSON_ERROR"
+
+
+class TestLoginFullFlow:
     def test_register_then_login_success(self, session: requests.Session, base_url: str):
         """Full flow: register a user, then login, expect token back."""
         uname = _unique("flowtest")

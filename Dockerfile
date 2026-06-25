@@ -2,7 +2,7 @@
 # Baihua Server - Production Docker Image
 # =============================================================================
 # Build:   docker build -t baihua-server .
-# Run:     docker run -e JWT_SECRET=... -e POSTGRES_HOST=db ... baihua-server
+# Run:     docker run -e JWT_SECRET=... -e POSTGRES_HOST=database ... baihua-server
 # Compose: docker compose --profile production up -d
 #
 # Multi-platform build (e.g. build AMD64 on ARM Mac):
@@ -62,7 +62,7 @@ EXPOSE 2424
 # Verifies both the server process AND database connectivity.
 # /health (src/health.rs) executes "SELECT 1" against PostgreSQL.
 #
-# Note: startup order is gated by docker-compose (db → service_healthy → server).
+# Note: startup order is gated by docker-compose (database → service_healthy → server).
 # For standalone runs, ensure the database is reachable before this container starts.
 # ---------------------------------------------------------------------------
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
@@ -79,7 +79,7 @@ USER baihua
 #   JWT_SECRET        Long random string (≥256 bits). MANDATORY in production.
 #   POSTGRES_USER     Database user
 #   POSTGRES_PASSWORD Database password
-#   POSTGRES_HOST     Database hostname (use "db" when running with docker-compose)
+#   POSTGRES_HOST     Database hostname (use "database" when running with docker-compose)
 #   POSTGRES_PORT     Database port (use "5432" in container networks)
 #   POSTGRES_DB       Database name
 #

@@ -16,7 +16,7 @@ Baihua is a team communication tool customized for developers, built with **Rust
 ## Table of Contents
 - [Table of Contents](#table-of-contents)
 - [Why We Need Baihua](#why-we-need-baihua)
-- [How to Use the Baihua Server](#how-to-use-the-baihua-server)
+- [Quick Start](#quick-start)
 - [How to Participate in Baihua's Development](#how-to-participate-in-baihuas-development)
 - [Special Thanks](#special-thanks)
 - [Contributors](#contributors)
@@ -32,9 +32,72 @@ Baihua is born to end this fragmented experience. It is a team communication too
 
 ---
 
-## How to Use the Baihua Server
-Baihua will create a configuration file at `~/.baihua/config.toml` by default, which you can modify autonomously.
-You can also type `help` in the Baihua server console to get information about server operations.
+## Quick Start
+
+### Prerequisites
+
+- **Docker** (for PostgreSQL)
+- **Rust toolchain** (stable, with rustfmt + clippy)
+- **Python 3.10+** and `pip install -r tests/requirements.txt` (for tests)
+
+### Development
+
+```bash
+# 1. Set up environment variables
+cp .env.example .env
+
+# 2. Start PostgreSQL via Docker
+docker compose up -d database
+
+# 3. Start the server (auto-runs migrations on first start)
+cargo run
+```
+
+The server starts on `http://localhost:2424`. An interactive console is available in the terminal — type `help` for commands.
+
+To run the full test suite (build + DB + server + pytest):
+
+```bash
+python3 tests/run_tests.py
+```
+
+### Production
+
+Deploy the entire stack with Docker Compose:
+
+```bash
+# 1. Set production environment variables
+export JWT_SECRET="your-256-bit-secret"
+export POSTGRES_USER="baihua"
+export POSTGRES_PASSWORD="strong-password"
+export POSTGRES_DB="baihua"
+
+# 2. Build and start everything (first build may take 10-15 min)
+docker compose --profile production up -d --build
+```
+
+> The first build downloads and compiles all Rust dependencies from scratch inside Docker.
+> Subsequent builds are much faster thanks to Docker's layer caching.
+> To watch build progress, use `docker compose --profile production up --build` (without `-d`).
+
+This starts two services:
+
+| Service | Container | Port |
+|---------|-----------|------|
+| **database** | `baihua-database` | 2423 (mapped) |
+| **server** | `baihua-server` | 2424 |
+
+The server is gated by the database health check and includes a Docker HEALTHCHECK (`GET /health`). Logs:
+
+```bash
+docker compose --profile production logs -f
+```
+
+To stop and clean up:
+
+```bash
+docker compose --profile production down -v
+```
 
 ---
 

@@ -16,7 +16,7 @@
 ## 目录
 - [目录](#目录)
 - [为什么我们需要白桦](#为什么我们需要白桦)
-- [如何使用白桦服务端](#如何使用白桦服务端)
+- [快速启动](#快速启动)
 - [如何参与白桦的开发](#如何参与白桦的开发)
 - [特别致谢](#特别致谢)
 - [贡献者](#贡献者)
@@ -31,9 +31,72 @@
 
 ---
 
-## 如何使用白桦服务端
-白桦会默认创建一个配置文件在`~/.baihua/config.toml`，你可以自主修改配置文件。   
-同时，你也可以在白桦服务端的控制台中键入`help`来获取服务端操作的信息。
+## 快速启动
+
+### 前置条件
+
+- **Docker**（用于 PostgreSQL 数据库）
+- **Rust 工具链**（stable，包含 rustfmt 和 clippy）
+- **Python 3.10+**，并执行 `pip install -r tests/requirements.txt`（用于测试）
+
+### 开发模式
+
+```bash
+# 1. 配置环境变量
+cp .env.example .env
+
+# 2. 通过 Docker 启动 PostgreSQL
+docker compose up -d database
+
+# 3. 启动服务端（首次启动自动执行数据库迁移）
+cargo run
+```
+
+服务端运行在 `http://localhost:2424`，终端中会启动交互式控制台——输入 `help` 查看命令。
+
+如需运行完整的测试套件（编译 + 数据库 + 服务端 + pytest）：
+
+```bash
+python3 tests/run_tests.py
+```
+
+### 生产部署
+
+使用 Docker Compose 部署整个服务栈：
+
+```bash
+# 1. 设置生产环境变量
+export JWT_SECRET="your-256-bit-secret"
+export POSTGRES_USER="baihua"
+export POSTGRES_PASSWORD="strong-password"
+export POSTGRES_DB="baihua"
+
+# 2. 构建并启动所有服务（首次构建可能需要 10-15 分钟）
+docker compose --profile production up -d --build
+```
+
+> 首次构建需要在 Docker 里从零下载并编译所有 Rust 依赖。
+> 后续构建由于 Docker 层缓存会快得多。
+> 如需查看构建进度，去掉 `-d` 参数：`docker compose --profile production up --build`。
+
+启动后包含两个服务：
+
+| 服务           | 容器名               | 端口       |
+|--------------|-------------------|----------|
+| **database** | `baihua-database` | 2423（映射） |
+| **server**   | `baihua-server`   | 2424     |
+
+服务端依赖数据库健康检查才启动，并自带 Docker HEALTHCHECK（`GET /health`）。查看日志：
+
+```bash
+docker compose --profile production logs -f
+```
+
+停止并清理：
+
+```bash
+docker compose --profile production down -v
+```
 
 ---
 

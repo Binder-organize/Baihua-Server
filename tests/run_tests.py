@@ -284,14 +284,14 @@ def _run_default(args):
         sys.exit(1)
 
     # ── Phase 2: Start Docker database ─────────────────────────────
-    log("Starting Docker Compose (db only)...")
+    log("Starting Docker Compose (database only)...")
     # Clean up any previous container + volume for a fresh start
     subprocess.run(
         ["docker", "compose", "down", "-v"],
         cwd=PROJECT_ROOT, capture_output=True,
     )
     result = subprocess.run(
-        ["docker", "compose", "up", "-d", "db"],
+        ["docker", "compose", "up", "-d", "database"],
         cwd=PROJECT_ROOT, capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -305,7 +305,7 @@ def _run_default(args):
     log("Waiting for Docker database...")
     for i in range(30):
         result = subprocess.run(
-            ["docker", "compose", "exec", "db", "pg_isready", "-U", "baihua_user", "-d", "baihua-database"],
+            ["docker", "compose", "exec", "database", "pg_isready", "-U", "baihua_user", "-d", "baihua-database"],
             cwd=PROJECT_ROOT, capture_output=True, text=True,
         )
         if result.returncode == 0:
@@ -313,9 +313,9 @@ def _run_default(args):
         time.sleep(2)
     else:
         log("Database did not become ready!")
-        log("--- docker compose logs db ---")
+        log("--- docker compose logs database ---")
         logs = subprocess.run(
-            ["docker", "compose", "logs", "db"],
+            ["docker", "compose", "logs", "database"],
             cwd=PROJECT_ROOT, capture_output=True, text=True,
         )
         log(logs.stdout)
@@ -445,7 +445,7 @@ def _run_local(args):
             db_info = docker_db
         else:
             log(
-                "No PostgreSQL found. Run 'docker compose up -d db' or "
+                "No PostgreSQL found. Run 'docker compose up -d database' or "
                 "install PostgreSQL locally."
             )
             sys.exit(1)

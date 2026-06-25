@@ -55,14 +55,61 @@
 5. **提交代码**：将你的代码提交到新的分支，并推送到 `GitHub`，关于提交信息，请查阅[提交信息规范](#提交信息规范)。
 6. **创建 Pull Request**：在 `GitHub` 上创建一个 `Pull Request`，将你的分支合并到白桦相应的开发分支。
 
-在提交代码时，请尽量遵循以下规范：
+在提交代码时，请**按以下顺序**遵循规范：
 
-- **代码风格**：在提交前请使用`clippy`和`cargo fmt`进行代码格式化。
-- **测试**：在提交前，请确保所有测试都通过。
-- **文档**：更新相关的文档，包括`/docs/`目录下的文档文件，根目录下的`README.md`文件等等。
+1. **代码风格**：运行 `cargo fmt` 和 `cargo clippy --locked -- -D warnings` 格式化并检查代码。
+2. **集成测试**：运行 `python3 tests/run_tests.py` 执行完整的集成测试套件。详见下方的[测试](#测试)章节。
+3. **文档**：更新相关的文档，包括`/docs/`目录下的文档文件，根目录下的`README.md`文件等等。
 
 > [!CAUTION]
 > 请务必遵守上述规则，否则可能会被我们拒绝合并你的代码。
+
+## 测试
+
+白桦使用 **Python pytest** 对运行中的 HTTP 服务器进行集成测试。测试代码位于 `tests/` 目录。
+
+### 前置条件
+
+- **Docker**（用于通过 `docker compose` 启动 PostgreSQL 数据库）
+- **Python 3.10+**，并执行 `pip install -r tests/requirements.txt` 安装依赖
+
+### 运行测试
+
+测试运行器负责完整的生命周期：编译 Rust 二进制、启动数据库、启动服务器、运行测试、清理环境。
+
+```bash
+# 默认模式（推荐）：Docker 中的数据库 + 本地编译的服务器二进制
+python3 tests/run_tests.py
+
+# 纯 Docker 模式（与 CI 一致）：所有组件在容器中构建和运行
+python3 tests/run_tests.py --docker
+
+# 本地 PostgreSQL 模式：使用本地已有的 PostgreSQL
+python3 tests/run_tests.py --local
+```
+
+预检步骤（`cargo fmt --check` 和 `clippy`）会自动执行。如需跳过：
+
+```bash
+python3 tests/run_tests.py --skip-checks
+```
+
+如需在测试结束后保持服务器运行（例如手动调试）：
+
+```bash
+python3 tests/run_tests.py --keep
+```
+
+### CI 流水线
+
+每次推送或 Pull Request 会触发两个 GitHub Actions 工作流：
+
+| 工作流 | 文件 | 检查内容 |
+|--------|------|----------|
+| **check** | `.github/workflows/check.yml` | `cargo fmt --check`、`cargo check --locked`、`clippy` |
+| **integration** | `.github/workflows/integration.yml` | 完整的 Docker 构建、冒烟测试、pytest 集成测试 |
+
+两者都通过后，Pull Request 才能被合并。
 
 #### 提交信息规范
 
