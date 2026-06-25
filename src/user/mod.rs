@@ -252,9 +252,16 @@ pub async fn verify_password(
 
 pub fn router(_state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
     axum::Router::new()
-        .route("/register", axum::routing::post(register::register))
-        .route("/login", axum::routing::post(login::login))
-        .layer(axum::middleware::from_fn(
-            middleware::validate::validate_user,
-        ))
+        .route(
+            "/register",
+            axum::routing::post(register::register).route_layer(axum::middleware::from_fn(
+                middleware::validate::validate_register,
+            )),
+        )
+        .route(
+            "/login",
+            axum::routing::post(login::login).route_layer(axum::middleware::from_fn(
+                middleware::validate::validate_login,
+            )),
+        )
 }

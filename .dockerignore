@@ -6,11 +6,18 @@ target/
 .gitignore
 .dockerignore
 
-# Environment (do not bake secrets into the image)
+# Environment
 .env
 .env.example
+.env.production
 
-# Docs (not needed at runtime)
+# CI
+.github/
+
+# Compose
+docker-compose.yml
+
+# Docs
 *.md
 docs/
 
@@ -21,6 +28,9 @@ docs/
 # macOS metadata
 .DS_Store
 
-# AI agent config
-.comate
+# AI agent
+.omo/
 AGENTS.md
+
+# Tests
+tests/

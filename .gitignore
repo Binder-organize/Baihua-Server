@@ -22,3 +22,7 @@ target
 # AI Agents
 AGENTS.md
 .omo
+
+# Tests
+tests/logs
+tests/__pycache__
