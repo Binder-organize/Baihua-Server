@@ -27,8 +27,10 @@ async fn validate_json_body(
 
     let max_size = if Environment::from_env().is_production() {
         MAX_BODY_SIZE_PRODUCTION
-    } else {
+    } else if Environment::from_env().is_development() {
         MAX_BODY_SIZE_DEVELOPMENT
+    } else {
+        unreachable!()
     };
 
     let (parts, body) = request.into_parts();

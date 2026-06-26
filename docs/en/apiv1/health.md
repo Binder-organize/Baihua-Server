@@ -50,4 +50,5 @@ Returned when the database connection fails.
 
 - Source: `src/health.rs`
 - Runs `SELECT 1` against PostgreSQL to verify pool availability
-- Bypasses all middleware (no logging, no authentication); suitable for load-balancer health probes
+- Bypasses authentication and request-body validation middleware; suitable for load-balancer health probes
+- Still passes through tracing, panic-catch, and 404-handler middleware

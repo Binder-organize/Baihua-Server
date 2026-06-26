@@ -54,8 +54,6 @@ pub fn validate_token(token: &str, secret: &str) -> Result<Claims, ErrorResponse
     })
 }
 
-// todo remove it.
-#[allow(dead_code)]
 pub fn extract_token_from_header(auth_header: &str) -> Result<&str, ErrorResponse> {
     if auth_header.is_empty() {
         return Err(ErrorResponse::Authentication(

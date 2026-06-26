@@ -2,16 +2,26 @@
 
 用户注册与登录接口。
 
-## 公共约束
+## 请求验证
 
-以下中间件应用于所有 `/api/v1/user/*` 请求：
+注册和登录接口经过请求验证中间件（`GET /api/v1/user/list` 不经过此中间件）。
+
+### 通用验证
+
+以下验证规则同时应用于 `POST /api/v1/user/register` 和 `POST /api/v1/user/login`：
 
 | 约束 | 说明 |
 |---|---|
 | Content-Type | 必须为 `application/json` |
 | 请求体大小上限 | 生产环境 **1 MB**，开发环境 **10 MB** |
 | JSON 合法性 | 请求体必须是合法 JSON |
-| 必填字段 | JSON 中必须包含非空的 `username` 和 `email` 字段 |
+
+### 字段必填验证
+
+| 接口 | 必填非空字段 |
+|---|---|
+| `POST /api/v1/user/register` | `username`、`email`、`password` |
+| `POST /api/v1/user/login` | `username`、`password` |
 
 源码位置：`src/middleware/validate.rs`
 
@@ -56,7 +66,7 @@
       "email": "alice@example.com",
       "nickname": null,
       "phone_number": null,
-      "created_at": "2026-06-23 15:35:27.871353 UTC",
+      "created_at": "2026-06-23T15:35:27.871353Z",
       "is_active": true
     }
   }
@@ -70,7 +80,7 @@
 | `data.user.email` | string | 邮箱 |
 | `data.user.nickname` | string \| null | 昵称，默认为 null |
 | `data.user.phone_number` | string \| null | 手机号，默认为 null |
-| `data.user.created_at` | string (UTC) | 创建时间 |
+| `data.user.created_at` | string (RFC 3339) | 创建时间 |
 | `data.user.is_active` | boolean | 是否激活，默认为 true |
 
 **注意：** 响应中不返回密码字段。
@@ -165,7 +175,7 @@
       "email": "alice@example.com",
       "nickname": null,
       "phone_number": null,
-      "created_at": "2026-06-23 15:35:27.871353 UTC",
+      "created_at": "2026-06-23T15:35:27.871353Z",
       "is_active": true
     }
   }
@@ -185,7 +195,7 @@
 
 ```json
 {
-  "sub": "alice",
+  "sub": "019ef520-0c59-7902-9959-86975c24af39",
   "iat": 1758640000,
   "exp": 1758726400
 }
@@ -193,7 +203,7 @@
 
 | 声明 | 描述 |
 |---|---|
-| `sub` | 用户名 |
+| `sub` | 用户 UUID（v7） |
 | `iat` | 签发时间（Unix 时间戳） |
 | `exp` | 过期时间（Unix 时间戳） |
 
@@ -226,6 +236,55 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTc1ODY0M
 
 ---
 
+## GET /api/v1/user/list
+
+获取所有已激活用户的列表（无需认证）。
+
+### 请求
+
+无请求头、无请求体。
+
+### 响应
+
+#### 成功响应
+
+- HTTP 状态码：`200 OK`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "OK",
+  "message": "Users retrieved successfully.",
+  "data": {
+    "users": [
+      {
+        "id": "019ef520-0c59-7902-9959-86975c24af39",
+        "username": "alice",
+        "email": "alice@example.com",
+        "nickname": null,
+        "phone_number": null,
+        "created_at": "2026-06-23T15:35:27.871353Z",
+        "is_active": true
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 描述 |
+|---|---|---|
+| `data.users` | array | 已激活用户数组，按创建时间倒序排列 |
+
+每个用户对象的结构与注册接口返回的 `user` 字段相同。
+
+### 说明
+
+- 源码位置：`src/user/list.rs`
+- 仅返回 `is_active = true` 的用户
+- 不经过验证中间件（无需 Content-Type 检查或 JSON 解析）
+
+---
+
 ## 统一错误响应格式
 
 所有错误响应遵循统一结构：
@@ -244,10 +303,10 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTc1ODY0M
 | HTTP 状态码 | `error_code` | 说明 | 来源 |
 |---|---|---|---|
 | 400 | `VALIDATION_ERROR` | 请求参数校验不通过 | 各业务接口 |
-| 400 | `INVALID_JSON_ERROR` | JSON 解析失败 | 中间件 |
-| 400 | `BAD_REQUEST_ERROR` | 请求体过大等 | 中间件 |
-| 401 | `AUTHENTICATION_ERROR` | 认证失败 | 登录接口 |
-| 403 | `FORBIDDEN_ERROR` | 权限不足（预留） | 全局 |
+| 400 | `INVALID_JSON_ERROR` | JSON 解析失败 | 验证中间件 |
+| 400 | `BAD_REQUEST_ERROR` | 请求体过大、目标用户不存在等 | 验证中间件、聊天接口 |
+| 401 | `AUTHENTICATION_ERROR` | 认证失败（未提供 Token、Token 无效或已过期、用户不存在） | 登录接口、认证中间件 |
+| 403 | `FORBIDDEN_ERROR` | 权限不足（不是聊天室成员等） | 聊天接口 |
 | 404 | `NOT_FOUND_ERROR` | 路由不存在 | 全局中间件 |
 | 500 | `INTERNAL_SERVER_ERROR` | 服务器内部错误 | 全局 |
 | 500 | `DATABASE_ERROR` | 数据库错误 | 各业务接口 |

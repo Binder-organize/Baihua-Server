@@ -34,8 +34,10 @@ impl Environment {
                         "Required environment variable '{}' is not set.",
                         name
                     ))
-                } else {
+                } else if self.is_development() {
                     Ok(dev_default.to_string())
+                } else {
+                    unreachable!()
                 }
             }
         }

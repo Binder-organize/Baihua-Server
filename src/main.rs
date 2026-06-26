@@ -1,6 +1,7 @@
 // Baihua Server, by Gavin Zheng on January 1, 2026.
 
 mod authenticate;
+mod chat;
 mod common;
 mod console;
 mod greet;
@@ -45,8 +46,10 @@ async fn main() -> Result<()> {
         "Baihua Server - v0.1.0 ({})",
         if env.is_production() {
             "production"
-        } else {
+        } else if env.is_development() {
             "development"
+        } else {
+            unreachable!()
         }
     );
 
@@ -97,7 +100,7 @@ async fn main() -> Result<()> {
                 "Received shutdown signal."
             }
         }
-    } else {
+    } else if state.environment.is_production() {
         info!("Console disabled in production mode.");
         let _command_tx = command_tx;
 
@@ -119,6 +122,8 @@ async fn main() -> Result<()> {
                 "Received shutdown signal."
             }
         }
+    } else {
+        unreachable!()
     };
 
     info!("Shutting down: {}", shutdown_reason);

@@ -36,7 +36,7 @@ pub async fn login(
     let token = generate_token(
         &state.jwt_secret,
         state.configure.user.jsonwebtoken_expiration_hours,
-        &user.username,
+        &user.id.to_string(),
     )
     .await?;
 
@@ -47,7 +47,7 @@ pub async fn login(
             user_login.username,
             user.id.to_string()
         );
-    } else {
+    } else if state.environment.is_development() {
         info!(
             "User logged in: {}, id: {}, token: {}.",
             user_login.username,

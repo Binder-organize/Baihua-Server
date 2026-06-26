@@ -2,16 +2,26 @@
 
 User registration and login endpoints.
 
-## Common Constraints
+## Request Validation
 
-The following middleware is applied to every `/api/v1/user/*` request:
+The validation middleware is applied to `POST /api/v1/user/register` and `POST /api/v1/user/login` (not to `GET /api/v1/user/list`).
+
+### Common Validation
+
+The following rules apply to both endpoints:
 
 | Constraint | Description |
 |---|---|
 | Content-Type | Must be `application/json` |
 | Max Body Size | **1 MB** in production, **10 MB** in development |
 | JSON Validity | Request body must be valid JSON |
-| Required Fields | JSON must contain non-empty `username` and `email` |
+
+### Required Fields
+
+| Endpoint | Required Non-Empty Fields |
+|---|---|
+| `POST /api/v1/user/register` | `username`, `email`, `password` |
+| `POST /api/v1/user/login` | `username`, `password` |
 
 Source: `src/middleware/validate.rs`
 
@@ -56,7 +66,7 @@ Create a new user account.
       "email": "alice@example.com",
       "nickname": null,
       "phone_number": null,
-      "created_at": "2026-06-23 15:35:27.871353 UTC",
+      "created_at": "2026-06-23T15:35:27.871353Z",
       "is_active": true
     }
   }
@@ -70,7 +80,7 @@ Create a new user account.
 | `data.user.email` | string | Email address |
 | `data.user.nickname` | string \| null | Display name, defaults to null |
 | `data.user.phone_number` | string \| null | Phone number, defaults to null |
-| `data.user.created_at` | string (UTC) | Account creation timestamp |
+| `data.user.created_at` | string (RFC 3339) | Account creation timestamp |
 | `data.user.is_active` | boolean | Whether the account is active, defaults to true |
 
 **Note:** The response never includes the password.
@@ -165,7 +175,7 @@ Authenticate a user and receive a JWT token.
       "email": "alice@example.com",
       "nickname": null,
       "phone_number": null,
-      "created_at": "2026-06-23 15:35:27.871353 UTC",
+      "created_at": "2026-06-23T15:35:27.871353Z",
       "is_active": true
     }
   }
@@ -185,7 +195,7 @@ Authenticate a user and receive a JWT token.
 
 ```json
 {
-  "sub": "alice",
+  "sub": "019ef520-0c59-7902-9959-86975c24af39",
   "iat": 1758640000,
   "exp": 1758726400
 }
@@ -193,7 +203,7 @@ Authenticate a user and receive a JWT token.
 
 | Claim | Description |
 |---|---|
-| `sub` | Username |
+| `sub` | User UUID (v7) |
 | `iat` | Issued-at timestamp (Unix epoch) |
 | `exp` | Expiration timestamp (Unix epoch) |
 
@@ -226,6 +236,55 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTc1ODY0M
 
 ---
 
+## GET /api/v1/user/list
+
+Retrieve all active users (no authentication required).
+
+### Request
+
+No headers, no request body.
+
+### Response
+
+#### Success
+
+- HTTP Status: `200 OK`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "OK",
+  "message": "Users retrieved successfully.",
+  "data": {
+    "users": [
+      {
+        "id": "019ef520-0c59-7902-9959-86975c24af39",
+        "username": "alice",
+        "email": "alice@example.com",
+        "nickname": null,
+        "phone_number": null,
+        "created_at": "2026-06-23T15:35:27.871353Z",
+        "is_active": true
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `data.users` | array | Array of active users, ordered by creation date descending |
+
+Each user object has the same structure as the `user` field in the register response.
+
+### Notes
+
+- Source: `src/user/list.rs`
+- Only returns users with `is_active = true`
+- Bypasses the validation middleware (no Content-Type check or JSON parsing)
+
+---
+
 ## Standard Error Envelope
 
 All error responses share a uniform structure:
@@ -244,10 +303,10 @@ All error responses share a uniform structure:
 | HTTP Status | `error_code` | Description | Origin |
 |---|---|---|---|
 | 400 | `VALIDATION_ERROR` | Request validation failed | Business logic |
-| 400 | `INVALID_JSON_ERROR` | JSON parsing failed | Middleware |
-| 400 | `BAD_REQUEST_ERROR` | Request body too large, etc. | Middleware |
-| 401 | `AUTHENTICATION_ERROR` | Authentication failed | Login endpoint |
-| 403 | `FORBIDDEN_ERROR` | Insufficient permissions (reserved) | Global |
+| 400 | `INVALID_JSON_ERROR` | JSON parsing failed | Validation middleware |
+| 400 | `BAD_REQUEST_ERROR` | Request body too large, target user not found, etc. | Validation middleware, chat endpoints |
+| 401 | `AUTHENTICATION_ERROR` | Authentication failed (missing token, invalid/expired token, user not found) | Login endpoint, auth middleware |
+| 403 | `FORBIDDEN_ERROR` | Insufficient permissions (not a chat room member, etc.) | Chat endpoints |
 | 404 | `NOT_FOUND_ERROR` | Route not found | Global middleware |
 | 500 | `INTERNAL_SERVER_ERROR` | Internal server error | Global |
 | 500 | `DATABASE_ERROR` | Database error | Business logic |

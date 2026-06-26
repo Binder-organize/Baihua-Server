@@ -1,3 +1,4 @@
+mod list;
 mod login;
 mod register;
 
@@ -8,13 +9,11 @@ use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, serde_as};
 use sqlx::{self, Row};
 use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
 
-#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
     // Primary key.
@@ -24,8 +23,7 @@ pub struct User {
     // Optional and repeatable user nickname.
     pub nickname: Option<String>,
     pub phone_number: Option<String>,
-    // UTC datetime.
-    #[serde_as(as = "DisplayFromStr")]
+    // UTC datetime (serialized as RFC 3339).
     pub created_at: DateTime<Utc>,
     pub is_active: bool,
 }
@@ -166,8 +164,38 @@ pub async fn new_user(
     })
 }
 
+// Find user by UUID.
+pub async fn find_user_by_id(
+    id: Uuid,
+    pool: &sqlx::Pool<sqlx::Postgres>,
+) -> Result<Option<User>, ErrorResponse> {
+    let row = sqlx::query(
+        r#"SELECT id, username, email, nickname, phone_number, created_at, is_active
+           FROM users WHERE id = $1"#,
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        error!("Database query failed during user lookup: {}", e);
+        ErrorResponse::InternalError("Failed to query user.".to_string())
+    })?;
+
+    match row {
+        Some(row) => Ok(Some(User {
+            id: row.get("id"),
+            username: row.get("username"),
+            email: row.get("email"),
+            nickname: row.get("nickname"),
+            phone_number: row.get("phone_number"),
+            created_at: row.get("created_at"),
+            is_active: row.get("is_active"),
+        })),
+        None => Ok(None),
+    }
+}
+
 // Find user by username.
-#[allow(dead_code)]
 pub async fn find_user_by_username(
     username: &str,
     pool: &sqlx::Pool<sqlx::Postgres>,
@@ -264,4 +292,5 @@ pub fn router(_state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
                 middleware::validate::validate_login,
             )),
         )
+        .route("/list", axum::routing::get(list::list_users))
 }

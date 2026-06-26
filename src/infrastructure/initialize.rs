@@ -51,8 +51,10 @@ pub async fn initialize(
             .context("Binary path has no parent directory.")?
             .to_path_buf();
         exe_dir.join("migrations")
-    } else {
+    } else if env.is_development() {
         std::path::PathBuf::from("migrations")
+    } else {
+        unreachable!()
     };
 
     let migrator = sqlx::migrate::Migrator::new(migrations_path)

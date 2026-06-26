@@ -61,5 +61,7 @@ pub async fn server(
 }
 
 fn api_v1(state: Arc<ServerState>) -> Router<Arc<ServerState>> {
-    Router::new().nest("/user", crate::user::router(state))
+    Router::new()
+        .nest("/user", crate::user::router(state.clone()))
+        .nest("/chat", crate::chat::router(state))
 }
