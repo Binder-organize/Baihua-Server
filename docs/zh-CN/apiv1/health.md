@@ -32,9 +32,9 @@
 | `message` | string | `"Service is healthy."` |
 | `data.status` | string | `"ok"` |
 
-#### 失败响应
+#### 错误响应
 
-数据库连接异常时返回。
+**数据库连接失败**
 
 - HTTP 状态码：`500 Internal Server Error`
 
@@ -42,11 +42,12 @@
 {
   "response_id": "019ef520-0c59-7902-9959-86975c24af39",
   "error_code": "INTERNAL_SERVER_ERROR",
-  "message": "Database connection failed."
+  "message": "Database connection failed.",
+  "data": null
 }
 ```
 
-### 实现说明
+### 说明
 
 - 源码位置：`src/health.rs`
 - 执行 `SELECT 1` 查询验证 PostgreSQL 连接池可用性

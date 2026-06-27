@@ -59,7 +59,6 @@ Create a new user account.
   "error_code": "OK",
   "message": "User created successfully",
   "data": {
-    "message": "User created successfully",
     "user": {
       "id": "019ef520-0c59-7902-9959-86975c24af39",
       "username": "alice",
@@ -135,6 +134,10 @@ Other possible validation error messages:
 | `Email address is too long (maximum 254 characters).` | Email exceeds 254 characters |
 | `Username must be between 4 and 40 characters long.` | Username length is out of range |
 | `Email cannot be 'gav.zheng@outlook.com'.` | Reserved email used |
+
+### Notes
+
+- Source: `src/user/register.rs`
 
 ---
 
@@ -233,6 +236,10 @@ Include the token in the `Authorization` header for authenticated requests:
 ```http
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTc1ODY0MDAwMCwiZXhwIjoxNzU4NzI2NDAwfQ...
 ```
+
+### Notes
+
+- Source: `src/user/login.rs`
 
 ---
 

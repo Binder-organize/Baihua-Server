@@ -20,7 +20,6 @@ pub async fn register(
         StatusCode::CREATED,
         "User created successfully".to_string(),
         json!({
-            "message": "User created successfully",
             "user": user_created
         }),
     ))

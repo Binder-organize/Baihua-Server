@@ -125,14 +125,28 @@ Token 通过 `POST /api/v1/user/login` 获取，详情见[用户文档](./user.m
 **目标用户不存在**
 
 - HTTP 状态码：`400 Bad Request`
-- `error_code`: `BAD_REQUEST_ERROR`
-- `message`: `"Target user not found."`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "BAD_REQUEST_ERROR",
+  "message": "Target user not found.",
+  "data": null
+}
+```
 
 **不能与自己创建聊天室**
 
 - HTTP 状态码：`400 Bad Request`
-- `error_code`: `BAD_REQUEST_ERROR`
-- `message`: `"Cannot create a room with yourself."`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "BAD_REQUEST_ERROR",
+  "message": "Cannot create a room with yourself.",
+  "data": null
+}
+```
 
 ### 说明
 
@@ -245,8 +259,15 @@ Token 通过 `POST /api/v1/user/login` 获取，详情见[用户文档](./user.m
 **不是聊天室成员**
 
 - HTTP 状态码：`403 Forbidden`
-- `error_code`: `FORBIDDEN_ERROR`
-- `message`: `"You are not a member of this room."`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "FORBIDDEN_ERROR",
+  "message": "You are not a member of this room.",
+  "data": null
+}
+```
 
 ### 说明
 
@@ -311,8 +332,15 @@ Token 通过 `POST /api/v1/user/login` 获取，详情见[用户文档](./user.m
 **不是聊天室成员**
 
 - HTTP 状态码：`403 Forbidden`
-- `error_code`: `FORBIDDEN_ERROR`
-- `message`: `"You are not a member of this room."`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "FORBIDDEN_ERROR",
+  "message": "You are not a member of this room.",
+  "data": null
+}
+```
 
 ### 分页用法
 

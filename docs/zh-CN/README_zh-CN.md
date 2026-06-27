@@ -20,6 +20,7 @@
 - [如何参与白桦的开发](#如何参与白桦的开发)
 - [特别致谢](#特别致谢)
 - [贡献者](#贡献者)
+- [FAQ](#faq)
 - [许可证](#许可证)
 
 ---
@@ -118,6 +119,18 @@ docker compose --profile production down -v
 <a href="https://github.com/Binder-organize/Baihua-Server/contributors">
   <img src="https://contrib.rocks/image?repo=Binder-organize/Baihua-Server" alt="Contributors"/>
 </a>
+
+---
+
+## FAQ
+Q1：Gavin 使用什么开发设备？  
+A1：MacBook Air M1。
+
+Q2：更多关于 Gavin 的信息？  
+A2：你可以访问[Gavin的Github主页](https://github.com/GavZheng)。
+
+Q3：为什么选择Rust？  
+A3：Rust凭借其卓越的跨平台能力、内存安全特性和高效执行性能，在综合评估Python/C++/C等候选语言后，被确认为满足项目需求的最佳技术选型。
 
 ---
 

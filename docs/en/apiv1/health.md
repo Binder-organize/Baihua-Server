@@ -32,9 +32,9 @@ No headers, no request body.
 | `message` | string | `"Service is healthy."` |
 | `data.status` | string | `"ok"` |
 
-#### Failure
+#### Errors
 
-Returned when the database connection fails.
+**Database connection failure**
 
 - HTTP Status: `500 Internal Server Error`
 
@@ -42,11 +42,12 @@ Returned when the database connection fails.
 {
   "response_id": "019ef520-0c59-7902-9959-86975c24af39",
   "error_code": "INTERNAL_SERVER_ERROR",
-  "message": "Database connection failed."
+  "message": "Database connection failed.",
+  "data": null
 }
 ```
 
-### Implementation Notes
+### Notes
 
 - Source: `src/health.rs`
 - Runs `SELECT 1` against PostgreSQL to verify pool availability

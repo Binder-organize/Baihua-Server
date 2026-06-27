@@ -59,7 +59,6 @@
   "error_code": "OK",
   "message": "User created successfully",
   "data": {
-    "message": "User created successfully",
     "user": {
       "id": "019ef520-0c59-7902-9959-86975c24af39",
       "username": "alice",
@@ -135,6 +134,10 @@
 | `Email address is too long (maximum 254 characters).` | 邮箱超长 |
 | `Username must be between 4 and 40 characters long.` | 用户名长度超出范围 |
 | `Email cannot be 'gav.zheng@outlook.com'.` | 使用了保留邮箱 |
+
+### 说明
+
+- 源码位置：`src/user/register.rs`
 
 ---
 
@@ -233,6 +236,10 @@
 ```http
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTc1ODY0MDAwMCwiZXhwIjoxNzU4NzI2NDAwfQ...
 ```
+
+### 说明
+
+- 源码位置：`src/user/login.rs`
 
 ---
 

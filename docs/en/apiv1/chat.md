@@ -120,19 +120,33 @@ Create a private chat room with another user. If a private room already exists b
 }
 ```
 
-#### Error Responses
+#### Errors
 
 **Target user not found**
 
 - HTTP Status: `400 Bad Request`
-- `error_code`: `BAD_REQUEST_ERROR`
-- `message`: `"Target user not found."`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "BAD_REQUEST_ERROR",
+  "message": "Target user not found.",
+  "data": null
+}
+```
 
 **Cannot create room with yourself**
 
 - HTTP Status: `400 Bad Request`
-- `error_code`: `BAD_REQUEST_ERROR`
-- `message`: `"Cannot create a room with yourself."`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "BAD_REQUEST_ERROR",
+  "message": "Cannot create a room with yourself.",
+  "data": null
+}
+```
 
 ### Notes
 
@@ -240,13 +254,20 @@ Send a message to a chat room.
 | `data.content` | string | Message content |
 | `data.created_at` | string (RFC 3339) | Timestamp |
 
-#### Error Responses
+#### Errors
 
 **Not a room member**
 
 - HTTP Status: `403 Forbidden`
-- `error_code`: `FORBIDDEN_ERROR`
-- `message`: `"You are not a member of this room."`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "FORBIDDEN_ERROR",
+  "message": "You are not a member of this room.",
+  "data": null
+}
+```
 
 ### Notes
 
@@ -306,13 +327,20 @@ Retrieve historical messages from a chat room with cursor-based pagination.
 
 Each message object contains `id`, `room_id`, `sender_id`, `content`, and `created_at`.
 
-#### Error Responses
+#### Errors
 
 **Not a room member**
 
 - HTTP Status: `403 Forbidden`
-- `error_code`: `FORBIDDEN_ERROR`
-- `message`: `"You are not a member of this room."`
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "FORBIDDEN_ERROR",
+  "message": "You are not a member of this room.",
+  "data": null
+}
+```
 
 ### Pagination Usage
 
