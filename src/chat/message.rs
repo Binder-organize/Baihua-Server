@@ -1,4 +1,5 @@
 use crate::ServerState;
+use crate::chat::is_room_member;
 use crate::common::error::ErrorResponse;
 use crate::common::success::SuccessResponse;
 use crate::middleware::authenticate::AuthenticatedUser;
@@ -33,18 +34,7 @@ pub async fn send_message(
 ) -> Result<SuccessResponse, ErrorResponse> {
     let Json(request) = body.map_err(|error| ErrorResponse::Json(error.to_string()))?;
 
-    // Check if the user is a chat room member.
-    let is_member = sqlx::query("SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2")
-        .bind(room_id)
-        .bind(auth_user.user_id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to check room membership: {}", error);
-            ErrorResponse::InternalError("Failed to check room membership.".to_string())
-        })?;
-
-    if is_member.is_none() {
+    if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
         return Err(ErrorResponse::Forbidden(
             "You are not a member of this room.".to_string(),
         ));
@@ -87,17 +77,7 @@ pub async fn get_messages(
     Path(room_id): Path<Uuid>,
     Query(params): Query<GetMessagesQuery>,
 ) -> Result<SuccessResponse, ErrorResponse> {
-    let is_member = sqlx::query("SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2")
-        .bind(room_id)
-        .bind(auth_user.user_id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to check room membership: {}", error);
-            ErrorResponse::InternalError("Failed to check room membership.".to_string())
-        })?;
-
-    if is_member.is_none() {
+    if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
         return Err(ErrorResponse::Forbidden(
             "You are not a member of this room.".to_string(),
         ));
@@ -105,12 +85,14 @@ pub async fn get_messages(
 
     let limit = params.limit.unwrap_or(50).min(100);
 
+    // Keyset pagination: use (created_at, id) composite to guarantee deterministic ordering
+    // even when two messages share the same created_at timestamp.
     let rows = if let Some(before_id) = params.before {
         sqlx::query(
             "SELECT id, room_id, sender_id, content, created_at FROM messages \
              WHERE room_id = $1 \
-               AND created_at < (SELECT created_at FROM messages WHERE id = $2) \
-             ORDER BY created_at DESC LIMIT $3",
+               AND (created_at, id) < (SELECT created_at, id FROM messages WHERE id = $2) \
+             ORDER BY created_at DESC, id DESC LIMIT $3",
         )
         .bind(room_id)
         .bind(before_id)
@@ -121,7 +103,7 @@ pub async fn get_messages(
         sqlx::query(
             "SELECT id, room_id, sender_id, content, created_at FROM messages \
              WHERE room_id = $1 \
-             ORDER BY created_at DESC LIMIT $2",
+             ORDER BY created_at DESC, id DESC LIMIT $2",
         )
         .bind(room_id)
         .bind(limit + 1)

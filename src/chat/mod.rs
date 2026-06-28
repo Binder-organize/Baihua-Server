@@ -1,3 +1,4 @@
+mod member;
 mod message;
 mod room;
 
@@ -7,8 +8,11 @@ use axum::Router;
 use axum::routing::get;
 use sqlx::PgPool;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
+
+pub const ROLE_ADMIN: &str = "admin";
+pub const ROLE_MEMBER: &str = "member";
 
 // Check if it is a room that exists.
 #[allow(dead_code)]
@@ -30,11 +34,144 @@ pub async fn is_room_member(
     Ok(row.is_some())
 }
 
+// Check if a user is an admin of a group room.
+pub async fn is_room_admin(
+    pool: &PgPool,
+    room_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, ErrorResponse> {
+    let row =
+        sqlx::query("SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2 AND role = $3")
+            .bind(room_id)
+            .bind(user_id)
+            .bind(ROLE_ADMIN)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| {
+                error!("Failed to check room admin: {}", error);
+                ErrorResponse::InternalError("Failed to check room admin.".to_string())
+            })?;
+
+    Ok(row.is_some())
+}
+
+// Count members in a room.
+pub async fn get_member_count(pool: &PgPool, room_id: Uuid) -> Result<i64, ErrorResponse> {
+    let row = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM room_members WHERE room_id = $1")
+        .bind(room_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|error| {
+            error!("Failed to count room members: {}", error);
+            ErrorResponse::InternalError("Failed to count room members.".to_string())
+        })?;
+
+    Ok(row)
+}
+
+// When the last admin leaves or is removed, promote a successor.
+//
+// Priority order:
+// 1. The room creator (created_by), if still a member and not the excluded user.
+// 2. The oldest remaining member by joined_at.
+//
+// Logs a warning if no eligible successor exists.
+pub async fn auto_promote_admin(
+    pool: &PgPool,
+    room_id: Uuid,
+    excluding_user_id: Uuid,
+) -> Result<(), ErrorResponse> {
+    // Look up the room's creator.
+    let creator_id = sqlx::query_scalar::<_, Uuid>("SELECT created_by FROM rooms WHERE id = $1")
+        .bind(room_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| {
+            error!("Failed to look up room creator: {}", error);
+            ErrorResponse::InternalError("Failed to look up room creator.".to_string())
+        })?;
+
+    // Priority 1: promote the room creator if eligible.
+    if let Some(creator) = creator_id
+        && creator != excluding_user_id
+    {
+        let is_member =
+            sqlx::query("SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2")
+                .bind(room_id)
+                .bind(creator)
+                .fetch_optional(pool)
+                .await
+                .map_err(|error| {
+                    error!("Failed to check creator membership: {}", error);
+                    ErrorResponse::InternalError("Failed to check creator membership.".to_string())
+                })?;
+
+        if is_member.is_some() {
+            sqlx::query("UPDATE room_members SET role = $1 WHERE room_id = $2 AND user_id = $3")
+                .bind(ROLE_ADMIN)
+                .bind(room_id)
+                .bind(creator)
+                .execute(pool)
+                .await
+                .map_err(|error| {
+                    error!("Failed to promote creator to admin: {}", error);
+                    ErrorResponse::InternalError("Failed to promote creator to admin.".to_string())
+                })?;
+
+            return Ok(());
+        }
+    }
+
+    // Priority 2: fall back to the oldest remaining member.
+    let successor = sqlx::query_scalar::<_, Uuid>(
+        "SELECT user_id FROM room_members \
+         WHERE room_id = $1 AND user_id != $2 \
+         ORDER BY joined_at ASC LIMIT 1",
+    )
+    .bind(room_id)
+    .bind(excluding_user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| {
+        error!("Failed to find successor admin: {}", error);
+        ErrorResponse::InternalError("Failed to find successor admin.".to_string())
+    })?;
+
+    if let Some(user_id) = successor {
+        sqlx::query("UPDATE room_members SET role = $1 WHERE room_id = $2 AND user_id = $3")
+            .bind(ROLE_ADMIN)
+            .bind(room_id)
+            .bind(user_id)
+            .execute(pool)
+            .await
+            .map_err(|error| {
+                error!("Failed to promote successor to admin: {}", error);
+                ErrorResponse::InternalError("Failed to promote successor to admin.".to_string())
+            })?;
+    } else {
+        warn!(
+            "No eligible successor to promote in room {} after excluding user {}",
+            room_id, excluding_user_id
+        );
+    }
+
+    Ok(())
+}
+
 pub fn router(state: Arc<ServerState>) -> Router<Arc<ServerState>> {
     Router::new()
         .route(
             "/rooms",
             get(room::list_rooms).post(room::create_or_get_room),
+        )
+        .route("/rooms/{room_id}", get(room::get_room_detail))
+        .route(
+            "/rooms/{room_id}/members",
+            get(member::list_members).post(member::add_members),
+        )
+        .route(
+            "/rooms/{room_id}/members/{user_id}",
+            axum::routing::delete(member::remove_member),
         )
         .route(
             "/rooms/{room_id}/messages",
