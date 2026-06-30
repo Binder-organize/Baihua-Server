@@ -36,73 +36,68 @@ impl SlidingWindowRateLimiter {
     }
 }
 
-// Login rate limiter: 20 requests per 60 seconds per IP.
-static LOGIN_LIMITER: LazyLock<SlidingWindowRateLimiter> = LazyLock::new(|| {
-    SlidingWindowRateLimiter {
+// Login rate limiter: 60 requests per 60 seconds per IP.
+static LOGIN_LIMITER: LazyLock<SlidingWindowRateLimiter> =
+    LazyLock::new(|| SlidingWindowRateLimiter {
         max_requests: 60,
         window_secs: 60,
         inner: RwLock::new(HashMap::new()),
-    }
-});
+    });
 
-// Register rate limiter: 10 requests per 60 seconds per IP.
-static REGISTER_LIMITER: LazyLock<SlidingWindowRateLimiter> = LazyLock::new(|| {
-    SlidingWindowRateLimiter {
+// Register rate limiter: 30 requests per 60 seconds per IP.
+static REGISTER_LIMITER: LazyLock<SlidingWindowRateLimiter> =
+    LazyLock::new(|| SlidingWindowRateLimiter {
         max_requests: 30,
         window_secs: 60,
         inner: RwLock::new(HashMap::new()),
-    }
-});
+    });
 
 fn extract_client_ip(request: &Request) -> Option<IpAddr> {
     // Priority 1: X-Forwarded-For (standard reverse proxy header).
-    if let Some(value) = request.headers().get("x-forwarded-for") {
-        if let Ok(value) = value.to_str() {
-            if let Some(ip_str) = value.split(',').next().map(|s| s.trim()) {
-                if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                    return Some(ip);
-                }
-            }
-        }
+    if let Some(value) = request.headers().get("x-forwarded-for")
+        && let Ok(value) = value.to_str()
+        && let Some(ip_str) = value.split(',').next().map(|s| s.trim())
+        && let Ok(ip) = ip_str.parse::<IpAddr>()
+    {
+        return Some(ip);
     }
 
     // Priority 2: X-Real-IP (common nginx header).
-    if let Some(value) = request.headers().get("x-real-ip") {
-        if let Ok(value) = value.to_str() {
-            if let Ok(ip) = value.parse::<IpAddr>() {
-                return Some(ip);
-            }
-        }
+    if let Some(value) = request.headers().get("x-real-ip")
+        && let Ok(value) = value.to_str()
+        && let Ok(ip) = value.parse::<IpAddr>()
+    {
+        return Some(ip);
     }
 
     None
 }
 
 pub async fn rate_limit_login(request: Request, next: Next) -> Response {
-    if let Some(ip) = extract_client_ip(&request) {
-        if !LOGIN_LIMITER.allow(ip).await {
-            let response = crate::common::StandardResponse::error(
-                axum::http::StatusCode::TOO_MANY_REQUESTS,
-                "RATE_LIMIT_ERROR".to_string(),
-                "Too many login attempts. Please try again later.".to_string(),
-            );
-            return (response.status, axum::Json(response.response)).into_response();
-        }
+    if let Some(ip) = extract_client_ip(&request)
+        && !LOGIN_LIMITER.allow(ip).await
+    {
+        let response = crate::common::StandardResponse::error(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            "RATE_LIMIT_ERROR".to_string(),
+            "Too many login attempts. Please try again later.".to_string(),
+        );
+        return (response.status, axum::Json(response.response)).into_response();
     }
 
     next.run(request).await
 }
 
 pub async fn rate_limit_register(request: Request, next: Next) -> Response {
-    if let Some(ip) = extract_client_ip(&request) {
-        if !REGISTER_LIMITER.allow(ip).await {
-            let response = crate::common::StandardResponse::error(
-                axum::http::StatusCode::TOO_MANY_REQUESTS,
-                "RATE_LIMIT_ERROR".to_string(),
-                "Too many registration attempts. Please try again later.".to_string(),
-            );
-            return (response.status, axum::Json(response.response)).into_response();
-        }
+    if let Some(ip) = extract_client_ip(&request)
+        && !REGISTER_LIMITER.allow(ip).await
+    {
+        let response = crate::common::StandardResponse::error(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            "RATE_LIMIT_ERROR".to_string(),
+            "Too many registration attempts. Please try again later.".to_string(),
+        );
+        return (response.status, axum::Json(response.response)).into_response();
     }
 
     next.run(request).await

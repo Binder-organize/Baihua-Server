@@ -27,6 +27,37 @@
 
 ---
 
+## 频率限制
+
+认证接口应用了频率限制以防止滥用：
+
+| 接口 | 限制 | 窗口 |
+|---|---|---|
+| `POST /api/v1/user/login` | 60 次 | 60 秒（滑动窗口） |
+| `POST /api/v1/user/register` | 30 次 | 60 秒（滑动窗口） |
+
+超出限制时，服务器返回 `429 Too Many Requests`：
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "RATE_LIMIT_ERROR",
+  "message": "Too many login attempts. Please try again later.",
+  "data": null
+}
+```
+
+频率限制使用基于客户端 IP 的滑动窗口算法。IP 检测优先使用 `X-Forwarded-For`，其次使用 `X-Real-IP`。
+
+### 说明
+
+- 源码位置：`src/middleware/rate_limit.rs`
+- 频率限制器在内存中运行（不持久化）；重启服务器会重置所有计数器
+- 无法检测到客户端 IP 的请求不会受到频率限制
+- 注册接口的限制（30 次/分钟）比登录接口（60 次/分钟）更严格，以减少账户创建滥用
+
+---
+
 ## POST /api/v1/user/register
 
 创建新用户。
@@ -138,6 +169,7 @@
 ### 说明
 
 - 源码位置：`src/user/register.rs`
+- 此接口受频率限制：每个 IP 每 60 秒最多 30 次（详见上方[频率限制](#频率限制)）
 
 ---
 
@@ -240,6 +272,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTc1ODY0M
 ### 说明
 
 - 源码位置：`src/user/login.rs`
+- 此接口受频率限制：每个 IP 每 60 秒最多 60 次（详见上方[频率限制](#频率限制)）
 
 ---
 
@@ -315,6 +348,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTc1ODY0M
 | 401 | `AUTHENTICATION_ERROR` | 认证失败（未提供 Token、Token 无效或已过期、用户不存在） | 登录接口、认证中间件 |
 | 403 | `FORBIDDEN_ERROR` | 权限不足（不是聊天室成员等） | 聊天接口 |
 | 404 | `NOT_FOUND_ERROR` | 路由不存在 | 全局中间件 |
+| 429 | `RATE_LIMIT_ERROR` | 请求过于频繁（频率限制） | 频率限制中间件 |
 | 500 | `INTERNAL_SERVER_ERROR` | 服务器内部错误 | 全局 |
 | 500 | `DATABASE_ERROR` | 数据库错误 | 各业务接口 |
 | 500 | `SERVER_CRASHES` | 服务 panic | 全局中间件 |
