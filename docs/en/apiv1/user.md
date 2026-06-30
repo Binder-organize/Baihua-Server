@@ -27,6 +27,37 @@ Source: `src/middleware/validate.rs`
 
 ---
 
+## Rate Limiting
+
+Rate limiting is applied to authentication endpoints to prevent abuse:
+
+| Endpoint | Limit | Window |
+|---|---|---|
+| `POST /api/v1/user/login` | 60 requests | 60 seconds (sliding window) |
+| `POST /api/v1/user/register` | 30 requests | 60 seconds (sliding window) |
+
+When the limit is exceeded, the server returns `429 Too Many Requests`:
+
+```json
+{
+  "response_id": "019ef520-0c59-7902-9959-86975c24af39",
+  "error_code": "RATE_LIMIT_ERROR",
+  "message": "Too many login attempts. Please try again later.",
+  "data": null
+}
+```
+
+The rate limiter uses a sliding window algorithm keyed by client IP. IP detection uses `X-Forwarded-For` first, then `X-Real-IP`.
+
+### Notes
+
+- Source: `src/middleware/rate_limit.rs`
+- The rate limiter is in-memory (not persisted); restarting the server resets all counters
+- Requests without a detectable client IP are passed through without rate limiting
+- Registration has a stricter limit (30/min) than login (60/min) to mitigate account creation abuse
+
+---
+
 ## POST /api/v1/user/register
 
 Create a new user account.
@@ -138,6 +169,7 @@ Other possible validation error messages:
 ### Notes
 
 - Source: `src/user/register.rs`
+- Rate limiting applies to this endpoint: 30 requests per 60 seconds per IP (see [Rate Limiting](#rate-limiting) above)
 
 ---
 
@@ -240,6 +272,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTc1ODY0M
 ### Notes
 
 - Source: `src/user/login.rs`
+- Rate limiting applies to this endpoint: 60 requests per 60 seconds per IP (see [Rate Limiting](#rate-limiting) above)
 
 ---
 
@@ -315,6 +348,7 @@ All error responses share a uniform structure:
 | 401 | `AUTHENTICATION_ERROR` | Authentication failed (missing token, invalid/expired token, user not found) | Login endpoint, auth middleware |
 | 403 | `FORBIDDEN_ERROR` | Insufficient permissions (not a chat room member, etc.) | Chat endpoints |
 | 404 | `NOT_FOUND_ERROR` | Route not found | Global middleware |
+| 429 | `RATE_LIMIT_ERROR` | Too many requests (rate limited) | Rate limiting middleware |
 | 500 | `INTERNAL_SERVER_ERROR` | Internal server error | Global |
 | 500 | `DATABASE_ERROR` | Database error | Business logic |
 | 500 | `SERVER_CRASHES` | Service panic | Global middleware |

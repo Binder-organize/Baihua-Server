@@ -4,7 +4,7 @@ mod register;
 
 use crate::common::error::ErrorResponse;
 use crate::{ServerState, middleware};
-use bcrypt::{DEFAULT_COST, hash, verify};
+use bcrypt::{DEFAULT_COST, hash};
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -260,37 +260,27 @@ pub async fn find_user_with_password(
     }
 }
 
-#[allow(dead_code)]
-pub async fn verify_password(
-    password: &str,
-    username: &str,
-    pool: &sqlx::Pool<sqlx::Postgres>,
-) -> Result<bool, ErrorResponse> {
-    match find_user_with_password(username, pool).await {
-        Ok(Some((_user, hashed_password))) => verify(password, &hashed_password).map_err(|error| {
-            error!("Password verification failed: {}", error);
-            ErrorResponse::BadRequest("Failed to verify credentials.".to_string())
-        }),
-        Ok(None) => Err(ErrorResponse::BadRequest(
-            "Incorrect username or password.".to_string(),
-        )),
-        Err(error) => Err(error),
-    }
-}
-
 pub fn router(_state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
     axum::Router::new()
         .route(
             "/register",
-            axum::routing::post(register::register).route_layer(axum::middleware::from_fn(
-                middleware::validate::validate_register,
-            )),
+            axum::routing::post(register::register)
+                .route_layer(axum::middleware::from_fn(
+                    middleware::validate::validate_register,
+                ))
+                .route_layer(axum::middleware::from_fn(
+                    middleware::rate_limit::rate_limit_register,
+                )),
         )
         .route(
             "/login",
-            axum::routing::post(login::login).route_layer(axum::middleware::from_fn(
-                middleware::validate::validate_login,
-            )),
+            axum::routing::post(login::login)
+                .route_layer(axum::middleware::from_fn(
+                    middleware::validate::validate_login,
+                ))
+                .route_layer(axum::middleware::from_fn(
+                    middleware::rate_limit::rate_limit_login,
+                )),
         )
         .route("/list", axum::routing::get(list::list_users))
 }

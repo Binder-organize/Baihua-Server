@@ -123,26 +123,14 @@ docker compose --profile production down -v
 ---
 
 ## FAQ
-Q1：Gavin 使用什么开发设备？  
-A1：MacBook Air M1。
+**Q1：Gavin 使用什么开发设备？**  
+**A1：** MacBook Air M1。
 
-Q2：更多关于 Gavin 的信息？  
-A2：你可以访问[Gavin的Github主页](https://github.com/GavZheng)。
+**Q2：更多关于 Gavin 的信息？**  
+**A2：** 你可以访问[Gavin的Github主页](https://github.com/GavZheng)。
 
-Q3：为什么选择Rust？  
-A3：Rust凭借其卓越的跨平台能力、内存安全特性和高效执行性能，在综合评估Python/C++/C等候选语言后，被确认为满足项目需求的最佳技术选型。
-
----
-
-## FAQ
-Q1：Gavin 使用什么开发设备？  
-A1：MacBook Air M1。
-
-Q2：更多关于 Gavin 的信息？  
-A2：你可以访问[Gavin的Github主页](https://github.com/GavZheng)。
-
-Q3：为什么选择Rust？  
-A3：Rust凭借其卓越的跨平台能力、内存安全特性和高效执行性能，在综合评估Python/C++/C等候选语言后，被确认为满足项目需求的最佳技术选型。
+**Q3：为什么选择Rust？**  
+**A3：** Rust凭借其卓越的跨平台能力、内存安全特性和高效执行性能，在综合评估Python/C++/C等候选语言后，被确认为满足项目需求的最佳技术选型。
 
 ---
 
