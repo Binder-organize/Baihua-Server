@@ -27,6 +27,9 @@ pub enum ErrorResponse {
 
     #[error("Insufficient permissions: {0}")]
     Forbidden(String),
+
+    #[error("Too many requests: {0}")]
+    TooManyRequests(String),
 }
 
 impl ErrorResponse {
@@ -37,6 +40,7 @@ impl ErrorResponse {
             ErrorResponse::BadRequest(_) => StatusCode::BAD_REQUEST,
             ErrorResponse::Authentication(_) => StatusCode::UNAUTHORIZED,
             ErrorResponse::Forbidden(_) => StatusCode::FORBIDDEN,
+            ErrorResponse::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
             ErrorResponse::Database(_) | ErrorResponse::InternalError(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -52,6 +56,7 @@ impl ErrorResponse {
             ErrorResponse::InternalError(_) => "INTERNAL_SERVER_ERROR",
             ErrorResponse::BadRequest(_) => "BAD_REQUEST_ERROR",
             ErrorResponse::Database(_) => "DATABASE_ERROR",
+            ErrorResponse::TooManyRequests(_) => "RATE_LIMIT_ERROR",
         }
     }
 
