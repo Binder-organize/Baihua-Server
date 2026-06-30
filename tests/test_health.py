@@ -1,0 +1,11 @@
+import requests
+
+
+class TestHealth:
+    def test_health_ok(self, session: requests.Session, base_url: str):
+        resp = session.get(f"{base_url}/health")
+        assert resp.status_code == 200
+
+        body = resp.json()
+        assert body["error_code"] == "OK"
+        assert body["data"]["status"] == "ok"

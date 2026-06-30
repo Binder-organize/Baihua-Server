@@ -1,0 +1,36 @@
+# Build artifacts
+target/
+
+# Version control
+.git/
+.gitignore
+.dockerignore
+
+# Environment
+.env
+.env.example
+.env.production
+
+# CI
+.github/
+
+# Compose
+docker-compose.yml
+
+# Docs
+*.md
+docs/
+
+# IDE config
+.idea/
+.vscode/
+
+# macOS metadata
+.DS_Store
+
+# AI agent
+.omo/
+AGENTS.md
+
+# Tests
+tests/
