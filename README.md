@@ -1,4 +1,4 @@
-<h1 style="text-align: center;">Baihua: The Communication Tool for Developers</h1>
+# Baihua: The Communication Tool for Developers
 
 [![Author: Gavin Zheng](https://img.shields.io/badge/Author-Gavin_Zheng-f2f28d)](https://github.com/GavZheng)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-orange)
@@ -6,6 +6,7 @@
 ![License: Apache v2](https://img.shields.io/badge/License-Apache%20v2-green)
 ![Github Stars](https://img.shields.io/github/stars/Binder-organize/Baihua-Server?style=flat&color=red)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-3.0-4baaaa.svg)](CODE_OF_CONDUCT.md)
+[![Docs](https://img.shields.io/badge/Docs-GitHub%20Pages-blue?logo=github)](https://binder-organize.github.io/Baihua-Server-Docs)
 
 [English](README.md) | [简体中文](./docs/zh-CN/README_zh-CN.md)
 

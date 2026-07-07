@@ -59,7 +59,7 @@
 
 1. **代码风格**：运行 `cargo fmt` 和 `cargo clippy --locked -- -D warnings` 格式化并检查代码。
 2. **集成测试**：运行 `python3 tests/run_tests.py` 执行完整的集成测试套件。详见下方的[测试](#测试)章节。
-3. **文档**：更新相关的文档，包括`/docs/`目录下的文档文件，根目录下的`README.md`文件等等。新增或修改 API 文档时，请使用 `docs/en/apiv1/TEMPLATE.md`（以及中文版本 `docs/zh-CN/apiv1/TEMPLATE.md`）中的模板，以保证格式统一。
+3. **文档**：更新相关的文档，包括`/docs/`目录下的文档文件，根目录下的`README.md`文件等等。API 文档发布在[白桦服务器文档](https://binder-organize.github.io/Baihua-Server-Docs)上。新增或修改 API 文档时，请编辑 [Baihua-Server-Docs](https://github.com/Binder-organize/Baihua-Server-Docs) 仓库中对应的 Markdown 文件（英文在 `docs/` 目录，中文在 `i18n/zh-CN/` 目录）。
 
 > [!CAUTION]
 > 请务必遵守上述规则，否则可能会被我们拒绝合并你的代码。

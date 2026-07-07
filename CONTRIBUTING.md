@@ -59,7 +59,7 @@ When submitting code, please follow these conventions **in order**:
 
 1.  **Code Style**: Run `cargo fmt` and `cargo clippy --locked -- -D warnings` to format and lint your code.
 2.  **Integration Tests**: Run the full test suite with `python3 tests/run_tests.py`. See [Testing](#testing) below for details.
-3.  **Documentation**: Update relevant documentation, including files in the `/docs/` directory, the `README.md` file in the root directory, etc. When adding or modifying API documentation, use the template at `docs/en/apiv1/TEMPLATE.md` (and its Chinese counterpart at `docs/zh-CN/apiv1/TEMPLATE.md`) to maintain a consistent format.
+3.  **Documentation**: Update relevant documentation, including files in the `/docs/` directory, the `README.md` file in the root directory, etc. API documentation is published on the [Baihua Server Documentations](https://binder-organize.github.io/Baihua-Server-Docs). When adding or modifying API documentation, edit the corresponding Markdown files in the [Baihua-Server-Docs](https://github.com/Binder-organize/Baihua-Server-Docs) repository (under `docs/` for English, `i18n/zh-CN/` for Chinese).
 
 > [!CAUTION]
 > Please be sure to follow the above rules, otherwise your code may be rejected for merging.
