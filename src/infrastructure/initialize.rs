@@ -4,12 +4,14 @@ use crate::infrastructure::config::AppConfigure;
 use crate::infrastructure::database::get_pool;
 use crate::infrastructure::environment::Environment;
 use crate::infrastructure::log;
+use crate::websocket::connection::ConnectionManager;
 use anyhow::{Context, Result, anyhow};
 use bcrypt::{DEFAULT_COST, hash};
 use chrono::Utc;
 use dirs::home_dir;
 use jsonwebtoken::crypto::{CryptoProvider, rust_crypto::DEFAULT_PROVIDER};
 use std::path::Path;
+use std::sync::Arc;
 use tokio::fs;
 use tracing::info;
 use uuid::Uuid;
@@ -85,6 +87,7 @@ pub async fn initialize(
         pool,
         jwt_secret,
         environment: env,
+        connection_manager: Arc::new(ConnectionManager::new()),
     };
 
     Ok((state, guard))

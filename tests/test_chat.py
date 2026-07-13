@@ -1,8 +1,11 @@
+import json
 import time
 import uuid
 from datetime import datetime
 
+import pytest
 import requests
+import websocket
 
 
 # ── helpers (module-level, mirroring test_user.py style) ──────────────
@@ -45,6 +48,42 @@ def _register_and_login(
     return body["data"]["token"], user
 
 
+# ── WebSocket helpers ──────────────────────────────────────────────
+
+def _ws_connect(ws_base: str, token: str, timeout: int = 10) -> websocket.WebSocket:
+    """Create a WebSocket connection with JWT token in query string."""
+    return websocket.create_connection(
+        f"{ws_base}/websocket?token={token}", timeout=timeout
+    )
+
+
+def _recv(ws: websocket.WebSocket, timeout: int = 10) -> dict:
+    """Receive one WebSocket message, parse JSON, with timeout."""
+    ws.settimeout(timeout)
+    raw = ws.recv()
+    return json.loads(raw)
+
+
+def _recv_until(
+    ws: websocket.WebSocket, expected_type: str, timeout: int = 10
+) -> dict:
+    """Consume messages until one of the expected type arrives. Skips others."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        ws.settimeout(remaining)
+        try:
+            raw = ws.recv()
+            msg = json.loads(raw)
+            if msg["type"] == expected_type:
+                return msg
+        except websocket.WebSocketTimeoutException:
+            break
+    pytest.fail(f"Did not receive '{expected_type}' within {timeout}s")
+
+
 # ── shared state (class-level, survives across test methods) ──────────
 
 class _State:
@@ -54,7 +93,7 @@ class _State:
 # ── tests ─────────────────────────────────────────────────────────────
 
 class ChatTest:
-    """10 scenarios for the /api/v1/chat feature."""
+    """21 scenarios for the /api/v1/chat feature (HTTP + WebSocket)."""
 
     @staticmethod
     def _auth(token: str) -> dict:
@@ -67,10 +106,10 @@ class ChatTest:
     ) -> None:
         """S1 – Create private room (happy path).
 
-        Register user A (login) and user B (register only).  A creates a
+        Register user A (login) and user B (login).  A creates a
         room with B.  Expect 201, a UUID room id, and 2 members."""
-        user_b = _register_user(session, base_url, prefix="chatb")
         token_a, user_a = _register_and_login(session, base_url, prefix="chata")
+        token_b, user_b = _register_and_login(session, base_url, prefix="chatb")
 
         resp = session.post(
             f"{base_url}/api/v1/chat/rooms",
@@ -96,6 +135,7 @@ class ChatTest:
         # persist for downstream tests
         ChatTest.room_id = room_id
         ChatTest.token_a = token_a
+        ChatTest.token_b = token_b
         ChatTest.user_a = user_a
         ChatTest.user_b = user_b
 
@@ -341,3 +381,260 @@ class ChatTest:
         # login (full flow via helper)
         token, _user = _register_and_login(session, base_url, prefix="s10log")
         assert token is not None
+
+    # ── S11 ────────────────────────────────────────────────────────────
+
+    def test_s11_websocket_fresh_user_empty_rooms(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S11 – Fresh user connects via WS.  `connected.rooms` must be []."""
+        token, _user = _register_and_login(session, base_url, prefix="s11")
+        ws_base = base_url.replace("http", "ws")
+        ws = _ws_connect(ws_base, token)
+        try:
+            msg = _recv(ws)
+            assert msg["type"] == "connected"
+            assert msg["data"]["rooms"] == []
+        finally:
+            ws.close()
+
+    # ── S12 ────────────────────────────────────────────────────────────
+
+    def test_s12_websocket_invalid_token(
+        self, base_url: str
+    ) -> None:
+        """S12 – Invalid JWT on WS upgrade → HTTP 401 before upgrade."""
+        ws_url = base_url.replace("http", "ws") + "/websocket?token=garbage"
+        with pytest.raises(websocket.WebSocketBadStatusException) as exc_info:
+            websocket.create_connection(ws_url, timeout=5)
+        assert exc_info.value.status_code == 401
+
+    # ── S13 ────────────────────────────────────────────────────────────
+
+    def test_s13_websocket_typing_missing_room_id(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S13 – Typing without room_id → server replies with `error`."""
+        token, _user = _register_and_login(session, base_url, prefix="s13")
+        ws_base = base_url.replace("http", "ws")
+        ws = _ws_connect(ws_base, token)
+        try:
+            _recv(ws)
+            ws.send(json.dumps({"type": "typing"}))
+            msg = _recv(ws)
+            assert msg["type"] == "error"
+            assert "room_id" in msg["data"]["message"]
+        finally:
+            ws.close()
+
+    # ── S14 ────────────────────────────────────────────────────────────
+
+    def test_s14_websocket_missing_type_field(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S14 – WS message without `type` field → server replies with `error`."""
+        token, _user = _register_and_login(session, base_url, prefix="s14")
+        ws_base = base_url.replace("http", "ws")
+        ws = _ws_connect(ws_base, token)
+        try:
+            _recv(ws)
+            ws.send(json.dumps({"room_id": "anything"}))
+            msg = _recv(ws)
+            assert msg["type"] == "error"
+            assert "type" in msg["data"]["message"]
+        finally:
+            ws.close()
+
+    # ── S15 ────────────────────────────────────────────────────────────
+
+    def test_s15_websocket_unknown_message_type(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S15 – Unknown WS message type → server replies with `error`."""
+        token, _user = _register_and_login(session, base_url, prefix="s15")
+        ws_base = base_url.replace("http", "ws")
+        ws = _ws_connect(ws_base, token)
+        try:
+            _recv(ws)
+            ws.send(json.dumps({"type": "foobar"}))
+            msg = _recv(ws)
+            assert msg["type"] == "error"
+            assert "foobar" in msg["data"]["message"]
+        finally:
+            ws.close()
+
+    # ── S16 ────────────────────────────────────────────────────────────
+
+    def test_s16_websocket_pong_backward_compat(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S16 – `pong` is silently ignored (legacy); connection stays alive."""
+        token, _user = _register_and_login(session, base_url, prefix="s16")
+        ws_base = base_url.replace("http", "ws")
+        ws = _ws_connect(ws_base, token)
+        try:
+            _recv(ws)
+            ws.send(json.dumps({"type": "pong"}))
+            # Connection should still be usable after pong
+            ws.send(json.dumps({"type": "foobar"}))
+            msg = _recv(ws)
+            assert msg["type"] == "error"  # foobar rejected, but not pong
+        finally:
+            ws.close()
+
+    # ── S17 ────────────────────────────────────────────────────────────
+
+    def test_s17_websocket_rooms_listed_on_connect(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S17 – User with rooms connects → `connected.rooms` lists them."""
+        ws_base = base_url.replace("http", "ws")
+        ws = _ws_connect(ws_base, ChatTest.token_a)
+        try:
+            msg = _recv(ws)
+            assert msg["type"] == "connected"
+            assert ChatTest.room_id in msg["data"]["rooms"]
+        finally:
+            ws.close()
+
+    # ── S18 ────────────────────────────────────────────────────────────
+
+    def test_s18_websocket_new_message_broadcast(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S18 – HTTP POST message → WS subscriber receives `new_message`."""
+        ws_base = base_url.replace("http", "ws")
+        ws_b = _ws_connect(ws_base, ChatTest.token_b)
+        try:
+            _recv(ws_b)
+
+            session.post(
+                f"{base_url}/api/v1/chat/rooms/{ChatTest.room_id}/messages",
+                json={"content": "hello from S18"},
+                headers=self._auth(ChatTest.token_a),
+            )
+
+            msg = _recv(ws_b)
+            assert msg["type"] == "new_message"
+            assert msg["data"]["room_id"] == ChatTest.room_id
+            assert msg["data"]["sender_id"] == ChatTest.user_a["id"]
+            assert msg["data"]["content"] == "hello from S18"
+        finally:
+            ws_b.close()
+
+    # ── S19 ────────────────────────────────────────────────────────────
+
+    def test_s19_websocket_typing_indicator(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S19 – User sends `typing` → other room member receives indicator."""
+        ws_base = base_url.replace("http", "ws")
+
+        ws_b = _ws_connect(ws_base, ChatTest.token_b)
+        try:
+            _recv(ws_b)
+
+            ws_a = _ws_connect(ws_base, ChatTest.token_a)
+            try:
+                _recv(ws_a)
+
+                ws_a.send(
+                    json.dumps({"type": "typing", "room_id": ChatTest.room_id})
+                )
+
+                msg = _recv_until(ws_b, "typing")
+                assert msg["data"]["room_id"] == ChatTest.room_id
+                assert msg["data"]["user_id"] == ChatTest.user_a["id"]
+                assert msg["data"]["username"] == ChatTest.user_a["username"]
+                assert msg["data"]["typing"] is True
+            finally:
+                ws_a.close()
+        finally:
+            ws_b.close()
+
+    # ── S20 ────────────────────────────────────────────────────────────
+
+    def test_s20_websocket_user_online_offline(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S20 – A connects → B sees `user_online`; A disconnects → B sees `user_offline`."""
+        ws_base = base_url.replace("http", "ws")
+
+        ws_b = _ws_connect(ws_base, ChatTest.token_b)
+        try:
+            _recv(ws_b)
+
+            ws_a = _ws_connect(ws_base, ChatTest.token_a)
+            try:
+                _recv(ws_a)
+
+                msg = _recv_until(ws_b, "user_online")
+                assert msg["data"]["user_id"] == ChatTest.user_a["id"]
+                assert msg["data"]["username"] == ChatTest.user_a["username"]
+            finally:
+                ws_a.close()
+                time.sleep(0.3)
+
+            msg = _recv_until(ws_b, "user_offline")
+            assert msg["data"]["user_id"] == ChatTest.user_a["id"]
+            assert msg["data"]["username"] == ChatTest.user_a["username"]
+        finally:
+            ws_b.close()
+
+    # ── S21 ────────────────────────────────────────────────────────────
+
+    def test_s21_websocket_leave_stops_messages(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S21 – User leaves room → WS stops receiving new_message for that room.
+
+        Flow:
+          1. B connects WS (auto-subscribed to A-B room).
+          2. A sends msg → B receives `new_message` (subscription active).
+          3. B leaves the room via HTTP DELETE.
+          4. A sends another msg → B must NOT receive it (cancel done).
+        """
+        ws_base = base_url.replace("http", "ws")
+        ws_b = _ws_connect(ws_base, ChatTest.token_b)
+        try:
+            _recv(ws_b)
+
+            # Confirm subscription works before leave
+            session.post(
+                f"{base_url}/api/v1/chat/rooms/{ChatTest.room_id}/messages",
+                json={"content": "before leave"},
+                headers=self._auth(ChatTest.token_a),
+            )
+            msg = _recv_until(ws_b, "new_message")
+            assert msg["data"]["content"] == "before leave"
+
+            # B leaves the room
+            resp = session.delete(
+                f"{base_url}/api/v1/chat/rooms/"
+                f"{ChatTest.room_id}/members/{ChatTest.user_b['id']}",
+                headers=self._auth(ChatTest.token_b),
+            )
+            assert resp.status_code == 200, resp.text
+            time.sleep(0.5)  # allow tokio to cancel the forward task
+
+            # A sends another message
+            session.post(
+                f"{base_url}/api/v1/chat/rooms/{ChatTest.room_id}/messages",
+                json={"content": "after leave"},
+                headers=self._auth(ChatTest.token_a),
+            )
+
+            # B should NOT receive this message
+            ws_b.settimeout(3)
+            try:
+                while True:
+                    raw = ws_b.recv()
+                    m = json.loads(raw)
+                    if m["type"] == "new_message":
+                        pytest.fail(
+                            f"Received new_message after leave: {m}"
+                        )
+            except websocket.WebSocketTimeoutException:
+                pass  # expected — no message arrived
+        finally:
+            ws_b.close()

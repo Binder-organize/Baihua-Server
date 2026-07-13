@@ -2,6 +2,15 @@
 
 All notable changes to Baihua Server will be documented in this file.
 
+## [0.1.1] - 2026-07-14
+
+### Added
+
+- **Real-time messaging via WebSocket** — `GET /websocket` with JWT auth, auto-subscribe to rooms, `new_message` push on send
+- **Presence system** — `user_online` / `user_offline` events, multi-device connection counting
+- **Typing indicators** — `typing` event relayed to all room members
+- **Heartbeat** — protocol-level PING every 30s, dead connection detection
+
 ## [0.1.0] - 2026-06-30
 
 ### Added
