@@ -1,4 +1,4 @@
-<h1 style="text-align: center;">白桦：属于开发者的沟通工具</h1>
+# 白桦：属于开发者的沟通工具
 
 [![Author: Gavin Zheng](https://img.shields.io/badge/Author-Gavin_Zheng-f2f28d)](https://github.com/GavZheng)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-orange)

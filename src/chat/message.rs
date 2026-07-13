@@ -58,6 +58,19 @@ pub async fn send_message(
         ErrorResponse::InternalError("Failed to send message.".to_string())
     })?;
 
+    let ws_message = json!({
+        "type": "new_message",
+        "data": {
+            "id": message_id,
+            "room_id": room_id,
+            "sender_id": auth_user.user_id,
+            "content": request.content,
+            "created_at": now.to_rfc3339(),
+        }
+    })
+    .to_string();
+    state.connection_manager.broadcast(room_id, &ws_message);
+
     Ok(SuccessResponse::new(
         StatusCode::CREATED,
         "Message sent successfully.".to_string(),

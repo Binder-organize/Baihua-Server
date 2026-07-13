@@ -10,6 +10,7 @@ mod infrastructure;
 mod middleware;
 mod server;
 mod user;
+mod websocket;
 
 use anyhow::Result;
 use infrastructure::config::AppConfigure;
@@ -17,7 +18,9 @@ use infrastructure::environment::Environment;
 use infrastructure::initialize;
 use sqlx::PgPool;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{error, info};
+use websocket::connection::ConnectionManager;
 
 #[derive(Debug, Clone)]
 pub struct Directory {
@@ -31,6 +34,7 @@ pub struct ServerState {
     pub pool: PgPool,
     pub jwt_secret: String,
     pub environment: Environment,
+    pub connection_manager: Arc<ConnectionManager>,
 }
 
 #[tokio::main]

@@ -41,7 +41,7 @@ jobs:
         run: curl -sf http://localhost:2424/greet
 
       - name: install python deps
-        run: pip install pytest requests
+        run: pip install -r tests/requirements.txt
 
       - name: integration tests
         run: python3 -m pytest tests/ -v --tb=short

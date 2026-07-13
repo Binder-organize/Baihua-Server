@@ -224,6 +224,10 @@ async fn handle_leave(
                 ErrorResponse::InternalError("Failed to delete room.".to_string())
             })?;
 
+        state
+            .connection_manager
+            .cancel_subscription(user_id, room_id);
+
         return Ok(SuccessResponse::new(
             StatusCode::OK,
             "You left the room. The room has been deleted as you were the last member.".to_string(),
@@ -250,6 +254,10 @@ async fn handle_leave(
             error!("Failed to remove member: {}", error);
             ErrorResponse::InternalError("Failed to remove member.".to_string())
         })?;
+
+    state
+        .connection_manager
+        .cancel_subscription(user_id, room_id);
 
     Ok(SuccessResponse::new(
         StatusCode::OK,
@@ -304,6 +312,10 @@ async fn handle_kick(
             error!("Failed to remove member: {}", error);
             ErrorResponse::InternalError("Failed to remove member.".to_string())
         })?;
+
+    state
+        .connection_manager
+        .cancel_subscription(target_user_id, room_id);
 
     // If the kicked user was an admin, auto-promote a successor.
     if target_is_admin {
