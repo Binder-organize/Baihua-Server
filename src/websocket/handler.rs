@@ -1,10 +1,12 @@
 use crate::ServerState;
 use crate::authenticate::jsonwebtoken::validate_token;
+use crate::chat::is_room_member;
 use crate::common::error::ErrorResponse;
 use crate::user::find_user_by_id;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
+use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
@@ -23,7 +25,12 @@ const WS_PONG: &str = "pong";
 const WS_USER_ONLINE: &str = "user_online";
 const WS_USER_OFFLINE: &str = "user_offline";
 const WS_TYPING_INDICATOR: &str = "typing";
+const WS_NEW_MESSAGE: &str = "new_message";
+const WS_MESSAGE_SENT: &str = "message_sent";
 const WS_ERROR: &str = "error";
+
+// Client -> Server
+const WS_SEND_MESSAGE: &str = "send_message";
 
 #[derive(Debug, Deserialize)]
 pub struct WebsocketQuery {
@@ -130,14 +137,20 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::
             msg = ws_receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let Err(e) = handle_incoming(
+                        match handle_incoming(
                             &state, &user, &text,
                         ).await {
-                            let err_msg = json!({
-                                "type": WS_ERROR,
-                                "data": { "message": e.to_string() }
-                            }).to_string();
-                            let _ = msg_tx.send(err_msg);
+                            Ok(Some(response)) => {
+                                let _ = msg_tx.send(response);
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                let err_msg = json!({
+                                    "type": WS_ERROR,
+                                    "data": { "message": error.to_string() }
+                                }).to_string();
+                                let _ = msg_tx.send(err_msg);
+                            }
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
@@ -221,11 +234,14 @@ fn subscribe_to_room(
 }
 
 // Process a JSON message received from the client.
+// Returns Ok(None) for messages that need no response,
+// Ok(Some(response)) for ack messages to send back,
+// or Err(error) for errors to send back.
 async fn handle_incoming(
     state: &Arc<ServerState>,
     user: &crate::user::User,
     text: &str,
-) -> Result<(), ErrorResponse> {
+) -> Result<Option<String>, ErrorResponse> {
     let value: serde_json::Value = serde_json::from_str(text)
         .map_err(|e| ErrorResponse::Json(format!("Invalid WS message JSON: {}", e)))?;
 
@@ -255,19 +271,93 @@ async fn handle_incoming(
             })
             .to_string();
             state.connection_manager.broadcast(room_id, &typing_msg);
+
+            Ok(None)
         }
 
-        WS_PONG => {}
+        WS_PONG => Ok(None),
 
-        _ => {
-            return Err(ErrorResponse::Validation(format!(
-                "Unknown WS message type: '{}'.",
-                msg_type
-            )));
+        WS_SEND_MESSAGE => {
+            let data = value.get("data").ok_or_else(|| {
+                ErrorResponse::Validation("Missing 'data' field in send_message.".to_string())
+            })?;
+
+            let room_id_str = data
+                .get("room_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    ErrorResponse::Validation("Missing 'room_id' in send_message data.".to_string())
+                })?;
+            let room_id = Uuid::parse_str(room_id_str)
+                .map_err(|_| ErrorResponse::Validation("Invalid room_id UUID.".to_string()))?;
+
+            let content = data
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    ErrorResponse::Validation("Missing 'content' in send_message data.".to_string())
+                })?;
+
+            validate_message_content(content)?;
+
+            if !is_room_member(&state.pool, room_id, user.id).await? {
+                return Err(ErrorResponse::Forbidden(
+                    "You are not a member of this room.".to_string(),
+                ));
+            }
+
+            let message_id = Uuid::now_v7();
+            let now = Utc::now();
+
+            sqlx::query(
+                "INSERT INTO messages (id, room_id, sender_id, content, created_at) \
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(message_id)
+            .bind(room_id)
+            .bind(user.id)
+            .bind(content)
+            .bind(now)
+            .execute(&state.pool)
+            .await
+            .map_err(|error| {
+                error!("Failed to insert message: {}", error);
+                ErrorResponse::InternalError("Failed to send message.".to_string())
+            })?;
+
+            let ws_message = json!({
+                "type": WS_NEW_MESSAGE,
+                "data": {
+                    "id": message_id,
+                    "room_id": room_id,
+                    "sender_id": user.id,
+                    "content": content,
+                    "created_at": now.to_rfc3339(),
+                }
+            })
+            .to_string();
+            state.connection_manager.broadcast(room_id, &ws_message);
+
+            let ack = json!({
+                "type": WS_MESSAGE_SENT,
+                "data": {
+                    "id": message_id,
+                    "room_id": room_id,
+                    "sender_id": user.id,
+                    "content": content,
+                    "created_at": now.to_rfc3339(),
+                }
+            })
+            .to_string();
+
+            Ok(Some(ack))
         }
+
+        _ => Err(ErrorResponse::Validation(format!(
+            "Unknown WS message type: '{}'.",
+            msg_type
+        ))),
     }
-
-    Ok(())
 }
 
 // Query all room IDs the user is a member of.
@@ -282,4 +372,22 @@ async fn get_user_room_ids(pool: &sqlx::PgPool, user_id: Uuid) -> Vec<Uuid> {
         error!("Failed to query user rooms: {}", error);
         vec![]
     })
+}
+
+// Validate chat message content.
+// Rejects empty/whitespace-only content and content exceeding 64 KB.
+fn validate_message_content(content: &str) -> Result<(), ErrorResponse> {
+    if content.trim().is_empty() {
+        return Err(ErrorResponse::Validation(
+            "Message content cannot be empty.".to_string(),
+        ));
+    }
+
+    if content.len() > 65536 {
+        return Err(ErrorResponse::Validation(
+            "Message content exceeds 65536 bytes.".to_string(),
+        ));
+    }
+
+    Ok(())
 }

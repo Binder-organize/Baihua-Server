@@ -1,6 +1,9 @@
+import json
+import time
 import uuid
 
 import requests
+import websocket
 
 
 # ── helpers (module-level, mirroring test_chat.py style) ──────────────
@@ -41,6 +44,42 @@ def _register_and_login(
     body = login_resp.json()
     assert body["error_code"] == "OK"
     return body["data"]["token"], user
+
+
+# ── WebSocket helpers ──────────────────────────────────────────────
+
+def _ws_connect(ws_base: str, token: str, timeout: int = 10) -> websocket.WebSocket:
+    """Create a WebSocket connection with JWT token in query string."""
+    return websocket.create_connection(
+        f"{ws_base}/websocket?token={token}", timeout=timeout
+    )
+
+
+def _recv(ws: websocket.WebSocket, timeout: int = 10) -> dict:
+    """Receive one WebSocket message, parse JSON, with timeout."""
+    ws.settimeout(timeout)
+    raw = ws.recv()
+    return json.loads(raw)
+
+
+def _recv_until(
+    ws: websocket.WebSocket, expected_type: str, timeout: int = 10
+) -> dict:
+    """Consume messages until one of the expected type arrives. Skips others."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        ws.settimeout(remaining)
+        try:
+            raw = ws.recv()
+            msg = json.loads(raw)
+            if msg["type"] == expected_type:
+                return msg
+        except websocket.WebSocketTimeoutException:
+            break
+    pytest.fail(f"Did not receive '{expected_type}' within {timeout}s")
 
 
 # ── shared state (class-level, survives across test methods) ──────────
@@ -369,7 +408,6 @@ class TestGroupChat:
 
         Register user X (not in the group). Verify 403 on:
         - GET /messages
-        - POST /messages
         - GET /rooms/{id}
         - GET /rooms/{id}/members"""
         token_x, _user_x = _register_and_login(session, base_url, prefix="grpx")
@@ -377,15 +415,6 @@ class TestGroupChat:
         # get messages
         resp = session.get(
             f"{base_url}/api/v1/chat/rooms/{TestGroupChat.room_id}/messages",
-            headers=self._auth(token_x),
-        )
-        assert resp.status_code == 403, resp.text
-        assert resp.json()["error_code"] == "FORBIDDEN_ERROR"
-
-        # send message
-        resp = session.post(
-            f"{base_url}/api/v1/chat/rooms/{TestGroupChat.room_id}/messages",
-            json={"content": "intruder"},
             headers=self._auth(token_x),
         )
         assert resp.status_code == 403, resp.text
@@ -412,20 +441,29 @@ class TestGroupChat:
     def test_g11_send_message_in_group(
         self, session: requests.Session, base_url: str
     ) -> None:
-        """G11 – Send a message in the group room.
+        """G11 – Send a message in the group room via WebSocket.
 
-        Expect 201, sender_id matches admin, content matches, room_id matches."""
-        resp = session.post(
-            f"{base_url}/api/v1/chat/rooms/{TestGroupChat.room_id}/messages",
-            json={"content": "hello from group"},
-            headers=self._auth(TestGroupChat.token_admin),
-        )
-        assert resp.status_code == 201, resp.text
-
-        data = resp.json()["data"]
-        assert data["sender_id"] == TestGroupChat.user_admin["id"]
-        assert data["content"] == "hello from group"
-        assert data["room_id"] == TestGroupChat.room_id
+        Expect message_sent ack, sender_id matches admin, content matches, room_id matches."""
+        ws_base = base_url.replace("http", "ws")
+        ws = _ws_connect(ws_base, TestGroupChat.token_admin)
+        try:
+            _recv(ws)  # consume "connected"
+            ws.send(
+                json.dumps({
+                    "type": "send_message",
+                    "data": {
+                        "room_id": TestGroupChat.room_id,
+                        "content": "hello from group",
+                    },
+                })
+            )
+            msg = _recv_until(ws, "message_sent")
+            data = msg["data"]
+            assert data["sender_id"] == TestGroupChat.user_admin["id"]
+            assert data["content"] == "hello from group"
+            assert data["room_id"] == TestGroupChat.room_id
+        finally:
+            ws.close()
 
     # ── G12 ───────────────────────────────────────────────────────────
 

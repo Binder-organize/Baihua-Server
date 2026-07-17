@@ -173,10 +173,7 @@ pub fn router(state: Arc<ServerState>) -> Router<Arc<ServerState>> {
             "/rooms/{room_id}/members/{user_id}",
             axum::routing::delete(member::remove_member),
         )
-        .route(
-            "/rooms/{room_id}/messages",
-            get(message::get_messages).post(message::send_message),
-        )
+        .route("/rooms/{room_id}/messages", get(message::get_messages))
         .route_layer(axum::middleware::from_fn_with_state(
             state,
             crate::middleware::authenticate::authenticate,
