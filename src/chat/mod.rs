@@ -14,8 +14,7 @@ use uuid::Uuid;
 pub const ROLE_ADMIN: &str = "admin";
 pub const ROLE_MEMBER: &str = "member";
 
-// Check if it is a room that exists.
-#[allow(dead_code)]
+// Check if a user is a member of a room.
 pub async fn is_room_member(
     pool: &PgPool,
     room_id: Uuid,

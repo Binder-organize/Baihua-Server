@@ -1,8 +1,6 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-// todo Add a comment for the configure.
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfigure {
     pub server: ServerConfigure,

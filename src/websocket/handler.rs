@@ -14,7 +14,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, interval};
-use tracing::error;
+use tokio::sync::broadcast::error::RecvError;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 // Client -> Server
@@ -223,7 +224,14 @@ fn subscribe_to_room(
                                 break;
                             }
                         }
-                        Err(_) => break,
+                        Err(RecvError::Lagged(n)) => {
+                            warn!(
+                                "forward task lagged by {n} messages for user {user_id} in room {room_id}; continuing"
+                            );
+                            // Receiver is still valid — skipped messages are gone,
+                            // but future messages will still arrive.
+                        }
+                        Err(RecvError::Closed) => break,
                     }
                 }
             }
