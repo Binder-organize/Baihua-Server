@@ -1,20 +1,21 @@
 use crate::ServerState;
-use crate::authenticate::jsonwebtoken::validate_token;
+use crate::authenticate::jsonwebtoken::{extract_token_from_header, validate_token};
 use crate::chat::is_room_member;
 use crate::common::error::ErrorResponse;
 use crate::user::find_user_by_id;
+use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, interval};
-use tokio::sync::broadcast::error::RecvError;
 use tracing::{error, warn};
 use uuid::Uuid;
 
@@ -33,18 +34,25 @@ const WS_ERROR: &str = "error";
 // Client -> Server
 const WS_SEND_MESSAGE: &str = "send_message";
 
-#[derive(Debug, Deserialize)]
-pub struct WebsocketQuery {
-    pub token: String,
+fn extract_ws_token(headers: &HeaderMap) -> Result<String, ErrorResponse> {
+    let auth_value = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ErrorResponse::Authentication("Missing Authorization header.".to_string())
+        })?;
+    let token = extract_token_from_header(auth_value)?;
+    Ok(token.to_string())
 }
 
 // HTTP handler that upgrades to WebSocket after JWT validation.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
-    Query(params): Query<WebsocketQuery>,
+    headers: HeaderMap,
     State(state): State<Arc<ServerState>>,
 ) -> Result<impl IntoResponse, ErrorResponse> {
-    let claims = validate_token(&params.token, &state.jwt_secret)?;
+    let token = extract_ws_token(&headers)?;
+    let claims = validate_token(&token, &state.jwt_secret)?;
 
     let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
         error!("JWT sub claim is not a valid UUID: {}", claims.sub);
@@ -61,11 +69,16 @@ pub async fn ws_handler(
         ));
     }
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user)))
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user, token)))
 }
 
 // Main WebSocket lifecycle handler.
-async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::user::User) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: Arc<ServerState>,
+    user: crate::user::User,
+    token: String,
+) {
     let manager = &state.connection_manager;
 
     // Presence: mark user online.
@@ -119,6 +132,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.tick().await; // skip the immediate first tick
 
+    let mut msg_timestamps: VecDeque<Instant> = VecDeque::new();
+    const WS_RATE_LIMIT: usize = 30;
+    const WS_RATE_WINDOW: Duration = Duration::from_secs(10);
+
+    let mut re_validate = interval(Duration::from_secs(600));
+    re_validate.tick().await; // skip the immediate first tick
+
     // Main event loop
     loop {
         tokio::select! {
@@ -138,19 +158,32 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::
             msg = ws_receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        match handle_incoming(
-                            &state, &user, &text,
-                        ).await {
-                            Ok(Some(response)) => {
-                                let _ = msg_tx.send(response);
-                            }
-                            Ok(None) => {}
-                            Err(error) => {
-                                let err_msg = json!({
-                                    "type": WS_ERROR,
-                                    "data": { "message": error.to_string() }
-                                }).to_string();
-                                let _ = msg_tx.send(err_msg);
+                        let now = Instant::now();
+                        while msg_timestamps.front().is_some_and(|t| now - *t > WS_RATE_WINDOW) {
+                            msg_timestamps.pop_front();
+                        }
+                        if msg_timestamps.len() >= WS_RATE_LIMIT {
+                            let err_msg = json!({
+                                "type": WS_ERROR,
+                                "data": { "message": "Rate limit exceeded. Please slow down." }
+                            }).to_string();
+                            let _ = msg_tx.send(err_msg);
+                        } else {
+                            msg_timestamps.push_back(now);
+                            match handle_incoming(
+                                &state, &user, &text,
+                            ).await {
+                                Ok(Some(response)) => {
+                                    let _ = msg_tx.send(response);
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    let err_msg = json!({
+                                        "type": WS_ERROR,
+                                        "data": { "message": error.to_string() }
+                                    }).to_string();
+                                    let _ = msg_tx.send(err_msg);
+                                }
                             }
                         }
                     }
@@ -159,11 +192,39 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::
                 }
             }
 
-            // Heartbeat: send PING every 30s. Client library auto-replies PONG.
-            // Failing to send means the connection (or TCP) is dead.
             _ = heartbeat.tick() => {
                 if ws_sender.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
+                }
+            }
+
+            _ = re_validate.tick() => {
+                if validate_token(&token, &state.jwt_secret).is_err() {
+                    let err_msg = json!({
+                        "type": WS_ERROR,
+                        "data": { "message": "Token expired. Please reconnect." }
+                    }).to_string();
+                    let _ = msg_tx.send(err_msg);
+                    break;
+                }
+                match find_user_by_id(user.id, &state.pool).await {
+                    Ok(Some(u)) if u.is_active => {}
+                    Ok(_) => {
+                        let err_msg = json!({
+                            "type": WS_ERROR,
+                            "data": { "message": "Session expired. Please reconnect." }
+                        }).to_string();
+                        let _ = msg_tx.send(err_msg);
+                        break;
+                    }
+                    Err(error) => {
+                        error!("Re-validation DB error for user {}: {}", user.id, error);
+                        let err_msg = json!({
+                            "type": WS_ERROR,
+                            "data": { "message": "Internal server error. Will retry." }
+                        }).to_string();
+                        let _ = msg_tx.send(err_msg);
+                    }
                 }
             }
         }
@@ -286,6 +347,15 @@ async fn handle_incoming(
         WS_PONG => Ok(None),
 
         WS_SEND_MESSAGE => {
+            let current_user = find_user_by_id(user.id, &state.pool)
+                .await?
+                .ok_or_else(|| ErrorResponse::Authentication("User not found.".to_string()))?;
+            if !current_user.is_active {
+                return Err(ErrorResponse::Authentication(
+                    "User is inactive.".to_string(),
+                ));
+            }
+
             let data = value.get("data").ok_or_else(|| {
                 ErrorResponse::Validation("Missing 'data' field in send_message.".to_string())
             })?;
