@@ -66,14 +66,13 @@ python3 tests/run_tests.py
 使用 Docker Compose 部署整个服务栈：
 
 ```bash
-# 1. 设置生产环境变量
-export JWT_SECRET="your-256-bit-secret"
-export POSTGRES_USER="baihua"
-export POSTGRES_PASSWORD="strong-password"
-export POSTGRES_DB="baihua"
+# 1. 准备生产环境变量
+# 从规范模板创建，填入你的生产密钥：
+cp .env.example .env.production
+# 然后编辑 .env.production，修改数据库密码、JWT 密钥等
 
 # 2. 构建并启动所有服务（首次构建可能需要 10-15 分钟）
-docker compose --profile production up -d --build
+docker compose --env-file .env.production --profile production up -d --build
 ```
 
 > 首次构建需要在 Docker 里从零下载并编译所有 Rust 依赖。

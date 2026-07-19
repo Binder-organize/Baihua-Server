@@ -67,14 +67,13 @@ python3 tests/run_tests.py
 Deploy the entire stack with Docker Compose:
 
 ```bash
-# 1. Set production environment variables
-export JWT_SECRET="your-256-bit-secret"
-export POSTGRES_USER="baihua"
-export POSTGRES_PASSWORD="strong-password"
-export POSTGRES_DB="baihua"
+# 1. Prepare production environment variables
+# Start from the canonical example and fill in your production secrets:
+cp .env.example .env.production
+# Then edit .env.production with your production values (DB user/password, JWT secret, etc.)
 
 # 2. Build and start everything (first build may take 10-15 min)
-docker compose --profile production up -d --build
+docker compose --env-file .env.production --profile production up -d --build
 ```
 
 > The first build downloads and compiles all Rust dependencies from scratch inside Docker.
