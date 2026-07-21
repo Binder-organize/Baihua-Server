@@ -49,9 +49,11 @@ def _register_and_login(
 # ── WebSocket helpers ──────────────────────────────────────────────
 
 def _ws_connect(ws_base: str, token: str, timeout: int = 10) -> websocket.WebSocket:
-    """Create a WebSocket connection with JWT token in query string."""
+    """Create a WebSocket connection with JWT token in Authorization header."""
     return websocket.create_connection(
-        f"{ws_base}/websocket?token={token}", timeout=timeout
+        f"{ws_base}/websocket",
+        header={"authorization": f"Bearer {token}"},
+        timeout=timeout,
     )
 
 

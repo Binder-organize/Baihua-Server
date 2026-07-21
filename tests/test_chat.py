@@ -51,9 +51,11 @@ def _register_and_login(
 # ── WebSocket helpers ──────────────────────────────────────────────
 
 def _ws_connect(ws_base: str, token: str, timeout: int = 10) -> websocket.WebSocket:
-    """Create a WebSocket connection with JWT token in query string."""
+    """Create a WebSocket connection with JWT token in Authorization header."""
     return websocket.create_connection(
-        f"{ws_base}/websocket?token={token}", timeout=timeout
+        f"{ws_base}/websocket",
+        header={"authorization": f"Bearer {token}"},
+        timeout=timeout,
     )
 
 
@@ -671,3 +673,57 @@ class ChatTest:
                 ws_a.close()
         finally:
             ws_b.close()
+
+    # ── S22 ────────────────────────────────────────────────────────────
+
+    def test_s22_typing_not_sent_to_sender(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """S22 – Typing indicator is not echoed back to the sender.
+
+        Flow:
+          1. A and B both connect WS to the shared room.
+          2. A sends a typing event.
+          3. B receives the typing indicator.
+          4. A must NOT receive their own typing indicator.
+        """
+        ws_base = base_url.replace("http", "ws")
+
+        ws_a = _ws_connect(ws_base, ChatTest.token_a)
+        try:
+            _recv(ws_a)  # consume "connected"
+
+            ws_b = _ws_connect(ws_base, ChatTest.token_b)
+            try:
+                _recv(ws_b)  # consume "connected"
+
+                # B may have received A's user_online — consume it
+                _recv_until(ws_b, "connected", timeout=3)
+
+                # Send typing from A
+                ws_a.send(
+                    json.dumps({"type": "typing", "room_id": ChatTest.room_id})
+                )
+
+                # B must receive the typing indicator
+                msg = _recv_until(ws_b, "typing", timeout=5)
+                assert msg["data"]["user_id"] == ChatTest.user_a["id"]
+                assert msg["data"]["username"] == ChatTest.user_a["username"]
+                assert msg["data"]["typing"] is True
+
+                # A must NOT receive the typing indicator
+                ws_a.settimeout(3)
+                try:
+                    while True:
+                        raw = ws_a.recv()
+                        m = json.loads(raw)
+                        if m["type"] == "typing":
+                            pytest.fail(
+                                f"A received their own typing indicator: {m}"
+                            )
+                except websocket.WebSocketTimeoutException:
+                    pass  # expected — no typing broadcast to sender
+            finally:
+                ws_b.close()
+        finally:
+            ws_a.close()

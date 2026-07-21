@@ -81,11 +81,28 @@ async fn handle_socket(
 ) {
     let manager = &state.connection_manager;
 
-    // Presence: mark user online.
-    let just_came_online = manager.user_connected(user.id);
+    // Per-connection channels (created first so we can send error messages).
+    let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<String>();
+
+    // Split the WebSocket into sender + receiver halves.
+    let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // Query all rooms the user belongs to.
-    let user_room_ids = get_user_room_ids(&state.pool, user.id).await;
+    let user_room_ids = match get_user_room_ids(&state.pool, user.id).await {
+        Ok(ids) => ids,
+        Err(error) => {
+            let err_msg = json!({
+                "type": WS_ERROR,
+                "data": { "message": error.to_string() }
+            })
+            .to_string();
+            let _ = ws_sender.send(Message::Text(err_msg.into())).await;
+            return;
+        }
+    };
+
+    // Presence: mark user online (only after rooms are loaded).
+    let just_came_online = manager.user_connected(user.id);
 
     if just_came_online {
         let online_msg = json!({
@@ -100,12 +117,6 @@ async fn handle_socket(
             manager.broadcast(room_id, &online_msg);
         }
     }
-
-    // Per-connection channels.
-    let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<String>();
-
-    // Split the WebSocket into sender + receiver halves.
-    let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // Track which rooms this connection is subscribed to.
     let mut subscribed_rooms: HashSet<Uuid> = HashSet::new();
@@ -230,8 +241,10 @@ async fn handle_socket(
         }
     }
 
-    // Cleanup
-    // subscribed_rooms and their forward tasks are dropped here implicitly.
+    // Cleanup: cancel all room subscriptions to clean up ConnectionManager.subs.
+    for &room_id in &subscribed_rooms {
+        manager.cancel_subscription(user.id, room_id);
+    }
 
     let fully_offline = manager.user_disconnected(user.id);
     if fully_offline {
@@ -281,6 +294,9 @@ fn subscribe_to_room(
                 msg = rx.recv() => {
                     match msg {
                         Ok(text) => {
+                            if is_own_typing_indicator(&text, user_id) {
+                                continue;
+                            }
                             if forward_tx.send(text).is_err() {
                                 break;
                             }
@@ -300,6 +316,36 @@ fn subscribe_to_room(
     });
 
     subscribed_rooms.insert(room_id);
+}
+
+// Check whether a broadcast message is a typing indicator from the given user.
+// Used in forward tasks to avoid echoing a user's own typing events back to them.
+fn is_own_typing_indicator(message: &str, user_id: Uuid) -> bool {
+    let value: serde_json::Value = match serde_json::from_str(message) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let msg_type = match value.get("type").and_then(|v| v.as_str()) {
+        Some(t) => t,
+        None => return false,
+    };
+    if msg_type != WS_TYPING_INDICATOR {
+        return false;
+    }
+    match value
+        .get("data")
+        .and_then(|d| d.get("user_id"))
+        .and_then(|u| u.as_str())
+    {
+        Some(id_str) => {
+            let id = match Uuid::parse_str(id_str) {
+                Ok(id) => id,
+                Err(_) => return false,
+            };
+            id == user_id
+        }
+        None => false,
+    }
 }
 
 // Process a JSON message received from the client.
@@ -439,17 +485,15 @@ async fn handle_incoming(
 }
 
 // Query all room IDs the user is a member of.
-async fn get_user_room_ids(pool: &sqlx::PgPool, user_id: Uuid) -> Vec<Uuid> {
-    let result =
-        sqlx::query_scalar::<_, Uuid>("SELECT room_id FROM room_members WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_all(pool)
-            .await;
-
-    result.unwrap_or_else(|error| {
-        error!("Failed to query user rooms: {}", error);
-        vec![]
-    })
+async fn get_user_room_ids(pool: &sqlx::PgPool, user_id: Uuid) -> Result<Vec<Uuid>, ErrorResponse> {
+    sqlx::query_scalar::<_, Uuid>("SELECT room_id FROM room_members WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| {
+            error!("Failed to query user rooms: {}", error);
+            ErrorResponse::Database("Failed to query user rooms.".to_string())
+        })
 }
 
 // Validate chat message content.
