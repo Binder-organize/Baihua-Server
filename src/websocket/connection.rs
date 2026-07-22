@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 use tokio::sync::{broadcast, watch};
-use tracing::trace;
+use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 type RoomSubKey = (Uuid, Uuid);
@@ -48,11 +48,14 @@ impl ConnectionManager {
             .expect("ConnectionManager rooms lock poisoned");
         if let Some(tx) = rooms.get(&room_id) {
             match tx.send(message.to_string()) {
+                Ok(0) => {
+                    debug!("broadcast to 0 receiver(s) in room {room_id}");
+                }
                 Ok(n) => {
                     trace!("broadcast to {n} receiver(s) in room {room_id}");
                 }
                 Err(_) => {
-                    trace!("broadcast to room {room_id}: no active receivers");
+                    warn!("broadcast to room {room_id} failed: send error");
                 }
             }
         }

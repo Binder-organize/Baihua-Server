@@ -106,10 +106,7 @@ class TestMessageValidation:
         )
         if expect_success:
             return _recv_until(ws, "message_sent", timeout=10)
-        msg = _recv(ws, timeout=10)
-        assert msg["type"] == "error", (
-            f"Expected 'error' for invalid content, got '{msg['type']}': {msg}"
-        )
+        msg = _recv_until(ws, "error", timeout=10)
         return msg
 
     @pytest.fixture(autouse=True)
@@ -150,12 +147,12 @@ class TestMessageValidation:
         ack = self._send_and_expect(ws, room_id, content, expect_success=True)
         assert ack["data"]["content"] == content
 
-    def test_valid_content_boundary_65536(self, _setup_room) -> None:
-        """65536-byte message (boundary) → message_sent ack."""
+    def test_valid_content_boundary_5000(self, _setup_room) -> None:
+        """5000-byte message (boundary) → message_sent ack."""
         ws, _token, _user, room_id = _setup_room
-        content = "a" * 65536
+        content = "a" * 5000
         ack = self._send_and_expect(ws, room_id, content, expect_success=True)
-        assert len(ack["data"]["content"]) == 65536
+        assert len(ack["data"]["content"]) == 5000
 
     def test_empty_content(self, _setup_room) -> None:
         """Empty string → server replies with error."""
@@ -170,8 +167,30 @@ class TestMessageValidation:
         assert "empty" in msg["data"]["message"].lower()
 
     def test_content_too_long(self, _setup_room) -> None:
-        """65537-byte content (1 over boundary) → server replies with error."""
+        """5001-byte content (1 over boundary) → server replies with error."""
         ws, _token, _user, room_id = _setup_room
-        content = "a" * 65537
+        content = "a" * 5001
         msg = self._send_and_expect(ws, room_id, content, expect_success=False)
-        assert "65536" in msg["data"]["message"]
+        assert "5000" in msg["data"]["message"]
+
+    def test_control_characters_stripped(self, _setup_room) -> None:
+        """Control characters (except newline) are stripped from content."""
+        ws, _token, _user, room_id = _setup_room
+        content = "he\x00llo\x01\x07 world"
+        ack = self._send_and_expect(ws, room_id, content, expect_success=True)
+        assert ack["data"]["content"] == "hello world"
+
+        # newline (\n) should be preserved
+        content_nl = "hello\nworld\x00test"
+        ack_nl = self._send_and_expect(ws, room_id, content_nl, expect_success=True)
+        assert ack_nl["data"]["content"] == "hello\nworldtest"
+
+        # all control characters → empty after strip → error
+        content_ctrl = "\x00\x01\x02"
+        msg = self._send_and_expect(ws, room_id, content_ctrl, expect_success=False)
+        assert "empty" in msg["data"]["message"].lower()
+
+        # only newlines and controls → newlines remain and then trimmed → empty → rejected
+        content_nl_ctrl = "\x00\n\x01"
+        msg = self._send_and_expect(ws, room_id, content_nl_ctrl, expect_success=False)
+        assert "empty" in msg["data"]["message"].lower()

@@ -682,33 +682,45 @@ class ChatTest:
         """S22 – Typing indicator is not echoed back to the sender.
 
         Flow:
-          1. A and B both connect WS to the shared room.
+          1. A and B both connect WS to a fresh shared room.
           2. A sends a typing event.
           3. B receives the typing indicator.
           4. A must NOT receive their own typing indicator.
+
+        Note: uses a fresh room because S21 removed user_b from
+        ChatTest.room_id, so that room is no longer shared.
         """
+        # Register fresh users and create a new room for this test,
+        # so we don't depend on state from earlier tests (S21 removes user_b).
+        token_a, user_a = _register_and_login(session, base_url, prefix="s22a")
+        token_b, user_b = _register_and_login(session, base_url, prefix="s22b")
+        resp = session.post(
+            f"{base_url}/api/v1/chat/rooms",
+            json={"username": user_b["username"]},
+            headers=self._auth(token_a),
+        )
+        assert resp.status_code == 201, resp.text
+        room_id = resp.json()["data"]["id"]
+
         ws_base = base_url.replace("http", "ws")
 
-        ws_a = _ws_connect(ws_base, ChatTest.token_a)
+        ws_a = _ws_connect(ws_base, token_a)
         try:
             _recv(ws_a)  # consume "connected"
 
-            ws_b = _ws_connect(ws_base, ChatTest.token_b)
+            ws_b = _ws_connect(ws_base, token_b)
             try:
                 _recv(ws_b)  # consume "connected"
 
-                # B may have received A's user_online — consume it
-                _recv_until(ws_b, "connected", timeout=3)
-
                 # Send typing from A
                 ws_a.send(
-                    json.dumps({"type": "typing", "room_id": ChatTest.room_id})
+                    json.dumps({"type": "typing", "room_id": room_id})
                 )
 
                 # B must receive the typing indicator
                 msg = _recv_until(ws_b, "typing", timeout=5)
-                assert msg["data"]["user_id"] == ChatTest.user_a["id"]
-                assert msg["data"]["username"] == ChatTest.user_a["username"]
+                assert msg["data"]["user_id"] == user_a["id"]
+                assert msg["data"]["username"] == user_a["username"]
                 assert msg["data"]["typing"] is True
 
                 # A must NOT receive the typing indicator

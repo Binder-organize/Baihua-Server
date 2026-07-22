@@ -1,5 +1,5 @@
 use crate::ServerState;
-use crate::chat::is_room_member;
+use crate::chat::{find_room_by_id, is_room_member};
 use crate::common::error::ErrorResponse;
 use crate::common::success::SuccessResponse;
 use crate::middleware::authenticate::AuthenticatedUser;
@@ -26,6 +26,8 @@ pub async fn get_messages(
     Path(room_id): Path<Uuid>,
     Query(params): Query<GetMessagesQuery>,
 ) -> Result<SuccessResponse, ErrorResponse> {
+    find_room_by_id(&state.pool, room_id).await?;
+
     if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
         return Err(ErrorResponse::Forbidden(
             "You are not a member of this room.".to_string(),
