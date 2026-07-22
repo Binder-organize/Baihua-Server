@@ -2,6 +2,29 @@
 
 All notable changes to Baihua Server will be documented in this file.
 
+## [0.1.2] - 2026-07-22
+
+### Added
+
+- **WebSocket message sending** — `send_message` client message type persisted and broadcast as `new_message`; `message_sent` acknowledgement sent to sender.
+- **WebSocket rate limiting** — 30 application messages per 10 seconds per connection with `error` response on exceed.
+- **WebSocket token re-validation** — periodic JWT and account-active check every 10 minutes; expired or deactivated sessions are disconnected.
+- **Message content validation** — control character stripping (except newlines), empty rejection, 5000-byte maximum.
+- **`NOT_FOUND_ERROR` error code** — `404` returned for room-not-found scenarios (replaces `400` in room detail; new in message listing).
+
+### Changed
+
+- **WebSocket authentication** — moved from query parameter (`?token=`) to `Authorization: Bearer <token>` header, consistent with the HTTP API.
+- **Room detail endpoint** — `GET /api/v1/chat/rooms/{room_id}` now returns `404 NOT_FOUND_ERROR` instead of `400 BAD_REQUEST_ERROR` when the room does not exist.
+- **Message listing endpoint** — `GET /api/v1/chat/rooms/{room_id}/messages` now validates room existence before checking membership, returning `404` for unknown rooms.
+- **Broadcast channel capacity** — increased from 256 to 1024 to reduce lag under heavy load.
+- **Typing indicator routing** — a user's own typing events are no longer echoed back to them.
+- **Connection cleanup** — room subscriptions are explicitly cancelled on disconnect instead of relying on implicit drop.
+
+### Fixed
+
+- **Broadcast lag handling** — `RecvError::Lagged` is now logged and handled gracefully without breaking the forward task.
+
 ## [0.1.1] - 2026-07-14
 
 ### Added
