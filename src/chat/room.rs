@@ -288,6 +288,8 @@ pub async fn get_room_detail(
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(room_id): Path<Uuid>,
 ) -> Result<SuccessResponse, ErrorResponse> {
+    crate::chat::find_room_by_id(&state.pool, room_id).await?;
+
     if !crate::chat::is_room_member(&state.pool, room_id, auth_user.user_id).await? {
         return Err(ErrorResponse::Forbidden(
             "You are not a member of this room.".to_string(),
@@ -303,7 +305,7 @@ pub async fn get_room_detail(
                 error!("Failed to get room: {}", error);
                 ErrorResponse::InternalError("Failed to get room.".to_string())
             })?
-            .ok_or(ErrorResponse::BadRequest("Room not found.".to_string()))?;
+            .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
 
     // Get members with user info.
     let member_rows = sqlx::query(

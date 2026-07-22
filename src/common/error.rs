@@ -30,6 +30,9 @@ pub enum ErrorResponse {
 
     #[error("Too many requests: {0}")]
     TooManyRequests(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
 }
 
 impl ErrorResponse {
@@ -41,6 +44,7 @@ impl ErrorResponse {
             ErrorResponse::Authentication(_) => StatusCode::UNAUTHORIZED,
             ErrorResponse::Forbidden(_) => StatusCode::FORBIDDEN,
             ErrorResponse::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
+            ErrorResponse::NotFound(_) => StatusCode::NOT_FOUND,
             ErrorResponse::Database(_) | ErrorResponse::InternalError(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -57,6 +61,7 @@ impl ErrorResponse {
             ErrorResponse::BadRequest(_) => "BAD_REQUEST_ERROR",
             ErrorResponse::Database(_) => "DATABASE_ERROR",
             ErrorResponse::TooManyRequests(_) => "RATE_LIMIT_ERROR",
+            ErrorResponse::NotFound(_) => "NOT_FOUND_ERROR",
         }
     }
 

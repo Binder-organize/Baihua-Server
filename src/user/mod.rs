@@ -260,8 +260,8 @@ pub async fn find_user_with_password(
     }
 }
 
-pub fn router(_state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
-    axum::Router::new()
+pub fn router(state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
+    let public = axum::Router::new()
         .route(
             "/register",
             axum::routing::post(register::register)
@@ -281,6 +281,14 @@ pub fn router(_state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
                 .route_layer(axum::middleware::from_fn(
                     middleware::rate_limit::rate_limit_login,
                 )),
-        )
+        );
+
+    let authenticated = axum::Router::new()
         .route("/list", axum::routing::get(list::list_users))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::middleware::authenticate::authenticate,
+        ));
+
+    axum::Router::new().merge(public).merge(authenticated)
 }

@@ -9,11 +9,10 @@ use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
 
-// todo remove it.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser {
     pub user_id: Uuid,
+    #[allow(dead_code)]
     pub access_token: String,
 }
 

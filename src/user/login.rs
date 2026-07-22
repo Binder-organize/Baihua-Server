@@ -26,7 +26,7 @@ pub async fn login(
 
     if !verify(&user_login.password, &password_hash).map_err(|error| {
         error!("Password verification failed: {}", error);
-        ErrorResponse::BadRequest("Failed to verify credentials.".to_string())
+        ErrorResponse::InternalError("Failed to verify credentials.".to_string())
     })? {
         return Err(ErrorResponse::Authentication(
             "Invalid username or password.".to_string(),
