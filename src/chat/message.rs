@@ -34,32 +34,53 @@ pub async fn get_messages(
         ));
     }
 
+    let is_encrypted: bool = sqlx::query_scalar("SELECT is_encrypted FROM rooms WHERE id = $1")
+        .bind(room_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|error| {
+            error!("Failed to check encrypted flag: {}", error);
+            ErrorResponse::InternalError("Failed to check encrypted flag.".to_string())
+        })?;
+
     let limit = params.limit.unwrap_or(50).min(100);
 
     // Keyset pagination: use (created_at, id) composite to guarantee deterministic ordering
     // even when two messages share the same created_at timestamp.
+    // For encrypted rooms, select encrypted_content as base64 instead of plaintext content.
+    // We alias the result to `content` so both branches use the same column name.
+    let content_expr = if is_encrypted {
+        "encode(encrypted_content, 'base64') AS content"
+    } else {
+        "content"
+    };
+
+    let query = format!("SELECT id, room_id, sender_id, {content_expr}, created_at FROM messages");
+
     let rows = if let Some(before_id) = params.before {
-        sqlx::query(
-            "SELECT id, room_id, sender_id, content, created_at FROM messages \
+        let q = format!(
+            "{query} \
              WHERE room_id = $1 \
                AND (created_at, id) < (SELECT created_at, id FROM messages WHERE id = $2) \
              ORDER BY created_at DESC, id DESC LIMIT $3",
-        )
-        .bind(room_id)
-        .bind(before_id)
-        .bind(limit + 1)
-        .fetch_all(&state.pool)
-        .await
+        );
+        sqlx::query(&q)
+            .bind(room_id)
+            .bind(before_id)
+            .bind(limit + 1)
+            .fetch_all(&state.pool)
+            .await
     } else {
-        sqlx::query(
-            "SELECT id, room_id, sender_id, content, created_at FROM messages \
+        let q = format!(
+            "{query} \
              WHERE room_id = $1 \
              ORDER BY created_at DESC, id DESC LIMIT $2",
-        )
-        .bind(room_id)
-        .bind(limit + 1)
-        .fetch_all(&state.pool)
-        .await
+        );
+        sqlx::query(&q)
+            .bind(room_id)
+            .bind(limit + 1)
+            .fetch_all(&state.pool)
+            .await
     }
     .map_err(|error| {
         error!("Failed to get messages: {}", error);
@@ -71,11 +92,16 @@ pub async fn get_messages(
 
     let messages: Vec<serde_json::Value> = visible
         .map(|row| {
+            let content_key = if is_encrypted {
+                "ciphertext"
+            } else {
+                "content"
+            };
             json!({
                 "id": row.get::<Uuid, _>("id"),
                 "room_id": row.get::<Uuid, _>("room_id"),
                 "sender_id": row.get::<Uuid, _>("sender_id"),
-                "content": row.get::<String, _>("content"),
+                content_key: row.get::<Option<String>, _>("content"),
                 "created_at": row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
             })
         })

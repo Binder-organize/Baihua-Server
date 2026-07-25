@@ -1,5 +1,6 @@
 use crate::ServerState;
 use crate::authenticate::jsonwebtoken::{extract_token_from_header, validate_token};
+use crate::chat::encrypted;
 use crate::chat::{find_room_by_id, is_room_member};
 use crate::common::error::ErrorResponse;
 use crate::user::find_user_by_id;
@@ -33,6 +34,13 @@ const WS_ERROR: &str = "error";
 
 // Client -> Server
 const WS_SEND_MESSAGE: &str = "send_message";
+
+// Encrypted chat (Client -> Server)
+const WS_ENCRYPT_REQUEST: &str = "encrypt_request";
+const WS_ENCRYPT_ACCEPT: &str = "encrypt_accept";
+const WS_ENCRYPT_READY: &str = "encrypt_ready";
+const WS_ENCRYPT_MESSAGE: &str = "encrypt_message";
+const WS_ENCRYPT_LEAVE: &str = "encrypt_leave";
 
 fn extract_ws_token(headers: &HeaderMap) -> Result<String, ErrorResponse> {
     let auth_value = headers
@@ -105,6 +113,11 @@ async fn handle_socket(
     let just_came_online = manager.user_connected(user.id);
 
     if just_came_online {
+        manager.cancel_grace_periods_for_user(user.id);
+
+        // Check for expired encrypted sessions.
+        encrypted::check_expired_session_on_connect(&state, user.id, &state.pool).await;
+
         let online_msg = json!({
             "type": WS_USER_ONLINE,
             "data": {
@@ -248,6 +261,9 @@ async fn handle_socket(
 
     let fully_offline = manager.user_disconnected(user.id);
     if fully_offline {
+        // Start grace periods for all active encrypted sessions this user was in.
+        encrypted::start_grace_periods_for_user(&state, user.id, &state.pool).await;
+
         let offline_msg = json!({
             "type": WS_USER_OFFLINE,
             "data": {
@@ -479,6 +495,69 @@ async fn handle_incoming(
             Ok(Some(ack))
         }
 
+        WS_ENCRYPT_REQUEST => {
+            let data = value.get("data").ok_or_else(|| {
+                ErrorResponse::Validation("Missing 'data' in encrypt_request.".to_string())
+            })?;
+            let room_id = parse_uuid_field(data, "room_id")?;
+            let public_key = parse_string_field(data, "public_key")?;
+            let identity_key = parse_string_field(data, "identity_key")?;
+            let signature = parse_string_field(data, "signature")?;
+            encrypted::handle_encrypt_request(
+                state,
+                user,
+                room_id,
+                public_key,
+                identity_key,
+                signature,
+            )
+            .await
+        }
+
+        WS_ENCRYPT_ACCEPT => {
+            let data = value.get("data").ok_or_else(|| {
+                ErrorResponse::Validation("Missing 'data' in encrypt_accept.".to_string())
+            })?;
+            let room_id = parse_uuid_field(data, "room_id")?;
+            let public_key = parse_string_field(data, "public_key")?;
+            let identity_key = parse_string_field(data, "identity_key")?;
+            let signature = parse_string_field(data, "signature")?;
+            encrypted::handle_encrypt_accept(
+                state,
+                user,
+                room_id,
+                public_key,
+                identity_key,
+                signature,
+            )
+            .await
+        }
+
+        WS_ENCRYPT_READY => {
+            let data = value.get("data").ok_or_else(|| {
+                ErrorResponse::Validation("Missing 'data' in encrypt_ready.".to_string())
+            })?;
+            let room_id = parse_uuid_field(data, "room_id")?;
+            encrypted::handle_encrypt_ready(state, user, room_id).await
+        }
+
+        WS_ENCRYPT_MESSAGE => {
+            let data = value.get("data").ok_or_else(|| {
+                ErrorResponse::Validation("Missing 'data' in encrypt_message.".to_string())
+            })?;
+            let room_id = parse_uuid_field(data, "room_id")?;
+            let ciphertext = parse_string_field(data, "ciphertext")?;
+            encrypted::handle_encrypt_message(state, user, room_id, ciphertext).await
+        }
+
+        WS_ENCRYPT_LEAVE => {
+            let data = value.get("data").ok_or_else(|| {
+                ErrorResponse::Validation("Missing 'data' in encrypt_leave.".to_string())
+            })?;
+            let room_id = parse_uuid_field(data, "room_id")?;
+            encrypted::handle_encrypt_leave(state, user, room_id, &state.pool).await
+        }
+
         _ => Err(ErrorResponse::Validation(format!(
             "Unknown WS message type: '{}'.",
             msg_type
@@ -519,4 +598,20 @@ fn validate_message_content(content: String) -> Result<String, ErrorResponse> {
     }
 
     Ok(trimmed)
+}
+
+fn parse_uuid_field(data: &serde_json::Value, field: &str) -> Result<Uuid, ErrorResponse> {
+    let raw = data
+        .get(field)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorResponse::Validation(format!("Missing '{}' field.", field)))?;
+    Uuid::parse_str(raw)
+        .map_err(|_| ErrorResponse::Validation(format!("Invalid UUID for '{}'.", field)))
+}
+
+fn parse_string_field(data: &serde_json::Value, field: &str) -> Result<String, ErrorResponse> {
+    data.get(field)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| ErrorResponse::Validation(format!("Missing '{}' field.", field)))
 }

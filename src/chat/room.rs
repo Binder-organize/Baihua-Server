@@ -33,6 +33,9 @@ pub struct CreateRoomRequest {
     // Whether this is a group room. Defaults to false (private chat).
     #[serde(default)]
     pub is_group: bool,
+    // Whether this room uses end-to-end encryption (private chat only).
+    #[serde(default)]
+    pub is_encrypted: bool,
 }
 
 pub async fn create_or_get_room(
@@ -191,15 +194,17 @@ async fn create_private_room(
     }
 
     // Check if a private room already exists between these two users.
+    // Encrypted and non-encrypted rooms are distinct; we match based on request.is_encrypted.
     let existing = sqlx::query(
-        "SELECT r.id, r.name, r.created_by, r.created_at, r.is_group \
+        "SELECT r.id, r.name, r.created_by, r.created_at, r.is_group, r.is_encrypted \
          FROM rooms r \
          INNER JOIN room_members m1 ON r.id = m1.room_id AND m1.user_id = $1 \
          INNER JOIN room_members m2 ON r.id = m2.room_id AND m2.user_id = $2 \
-         WHERE r.is_group = false",
+         WHERE r.is_group = false AND r.is_encrypted = $3",
     )
     .bind(auth_user.user_id)
     .bind(target_user.id)
+    .bind(request.is_encrypted)
     .fetch_optional(&state.pool)
     .await
     .map_err(|error| {
@@ -219,6 +224,7 @@ async fn create_private_room(
                 "created_by": row.get::<Uuid, _>("created_by"),
                 "created_at": row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
                 "is_group": row.get::<bool, _>("is_group"),
+                "is_encrypted": row.get::<bool, _>("is_encrypted"),
                 "members": members
             }),
         ));
@@ -234,13 +240,14 @@ async fn create_private_room(
     let now = Utc::now();
 
     sqlx::query(
-        "INSERT INTO rooms (id, name, created_by, created_at, is_group) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO rooms (id, name, created_by, created_at, is_group, is_encrypted) VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(room_id)
     .bind(Option::<String>::None)
     .bind(auth_user.user_id)
     .bind(now)
     .bind(false)
+    .bind(request.is_encrypted)
     .execute(&mut *tx)
     .await
     .map_err(|error| {
@@ -277,6 +284,7 @@ async fn create_private_room(
             "created_by": auth_user.user_id,
             "created_at": now.to_rfc3339(),
             "is_group": false,
+            "is_encrypted": request.is_encrypted,
             "members": member_ids
         }),
     ))
@@ -296,16 +304,17 @@ pub async fn get_room_detail(
         ));
     }
 
-    let room_row =
-        sqlx::query("SELECT id, name, created_by, created_at, is_group FROM rooms WHERE id = $1")
-            .bind(room_id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to get room: {}", error);
-                ErrorResponse::InternalError("Failed to get room.".to_string())
-            })?
-            .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
+    let room_row = sqlx::query(
+        "SELECT id, name, created_by, created_at, is_group, is_encrypted FROM rooms WHERE id = $1",
+    )
+    .bind(room_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|error| {
+        error!("Failed to get room: {}", error);
+        ErrorResponse::InternalError("Failed to get room.".to_string())
+    })?
+    .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
 
     // Get members with user info.
     let member_rows = sqlx::query(
@@ -347,6 +356,7 @@ pub async fn get_room_detail(
             "created_by": room_row.get::<Uuid, _>("created_by"),
             "created_at": room_row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
             "is_group": room_row.get::<bool, _>("is_group"),
+            "is_encrypted": room_row.get::<bool, _>("is_encrypted"),
             "member_count": member_count,
             "members": members,
         }),
@@ -361,7 +371,7 @@ pub async fn list_rooms(
 ) -> Result<SuccessResponse, ErrorResponse> {
     // Query 1: rooms the user belongs to, with member count and last message preview.
     let room_rows = sqlx::query(
-        "SELECT r.id, r.name, r.created_by, r.created_at, r.is_group, rm.role, \
+        "SELECT r.id, r.name, r.created_by, r.created_at, r.is_group, r.is_encrypted, rm.role, \
                 mc.cnt AS member_count, \
                 lm.msg_id AS last_msg_id, lm.content AS last_msg_content, \
                 lm.created_at AS last_msg_created_at, lm.sender_username AS last_msg_sender_username \
@@ -417,17 +427,21 @@ pub async fn list_rooms(
     let mut rooms = Vec::new();
     for row in &room_rows {
         let room_id: Uuid = row.get("id");
+        let is_encrypted: bool = row.get("is_encrypted");
 
-        let last_message = row
-            .get::<Option<String>, _>("last_msg_content")
-            .map(|content| {
-                json!({
-                    "id": row.get::<Uuid, _>("last_msg_id"),
-                    "content": content,
-                    "sender_username": row.get::<String, _>("last_msg_sender_username"),
-                    "created_at": row.get::<DateTime<Utc>, _>("last_msg_created_at").to_rfc3339(),
+        let last_message = if is_encrypted {
+            None
+        } else {
+            row.get::<Option<String>, _>("last_msg_content")
+                .map(|content| {
+                    json!({
+                        "id": row.get::<Uuid, _>("last_msg_id"),
+                        "content": content,
+                        "sender_username": row.get::<String, _>("last_msg_sender_username"),
+                        "created_at": row.get::<DateTime<Utc>, _>("last_msg_created_at").to_rfc3339(),
+                    })
                 })
-            });
+        };
 
         let members = members_map.get(&room_id).cloned().unwrap_or_default();
 
@@ -437,6 +451,7 @@ pub async fn list_rooms(
             "created_by": row.get::<Uuid, _>("created_by"),
             "created_at": row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
             "is_group": row.get::<bool, _>("is_group"),
+            "is_encrypted": is_encrypted,
             "member_count": row.get::<i64, _>("member_count"),
             "role": row.get::<String, _>("role"),
             "members": members,
