@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 use tokio::sync::{broadcast, watch};
+use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 type RoomSubKey = (Uuid, Uuid);
@@ -32,20 +33,31 @@ impl ConnectionManager {
             .write()
             .expect("ConnectionManager rooms lock poisoned");
         let tx = rooms.entry(room_id).or_insert_with(|| {
-            let (tx, _) = broadcast::channel(256);
+            let (tx, _) = broadcast::channel(1024);
             tx
         });
         tx.subscribe()
     }
 
     // Broadcast a message to all subscribers of a room.
+    // Logs the number of receivers that got the message (trace level).
     pub fn broadcast(&self, room_id: Uuid, message: &str) {
         let rooms = self
             .rooms
             .read()
             .expect("ConnectionManager rooms lock poisoned");
         if let Some(tx) = rooms.get(&room_id) {
-            let _ = tx.send(message.to_string());
+            match tx.send(message.to_string()) {
+                Ok(0) => {
+                    debug!("broadcast to 0 receiver(s) in room {room_id}");
+                }
+                Ok(n) => {
+                    trace!("broadcast to {n} receiver(s) in room {room_id}");
+                }
+                Err(_) => {
+                    warn!("broadcast to room {room_id} failed: send error");
+                }
+            }
         }
     }
 

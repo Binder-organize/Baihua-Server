@@ -1,18 +1,22 @@
 use crate::ServerState;
-use crate::authenticate::jsonwebtoken::validate_token;
+use crate::authenticate::jsonwebtoken::{extract_token_from_header, validate_token};
+use crate::chat::{find_room_by_id, is_room_member};
 use crate::common::error::ErrorResponse;
 use crate::user::find_user_by_id;
+use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
+use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, interval};
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 // Client -> Server
@@ -23,20 +27,32 @@ const WS_PONG: &str = "pong";
 const WS_USER_ONLINE: &str = "user_online";
 const WS_USER_OFFLINE: &str = "user_offline";
 const WS_TYPING_INDICATOR: &str = "typing";
+const WS_NEW_MESSAGE: &str = "new_message";
+const WS_MESSAGE_SENT: &str = "message_sent";
 const WS_ERROR: &str = "error";
 
-#[derive(Debug, Deserialize)]
-pub struct WebsocketQuery {
-    pub token: String,
+// Client -> Server
+const WS_SEND_MESSAGE: &str = "send_message";
+
+fn extract_ws_token(headers: &HeaderMap) -> Result<String, ErrorResponse> {
+    let auth_value = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ErrorResponse::Authentication("Missing Authorization header.".to_string())
+        })?;
+    let token = extract_token_from_header(auth_value)?;
+    Ok(token.to_string())
 }
 
 // HTTP handler that upgrades to WebSocket after JWT validation.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
-    Query(params): Query<WebsocketQuery>,
+    headers: HeaderMap,
     State(state): State<Arc<ServerState>>,
 ) -> Result<impl IntoResponse, ErrorResponse> {
-    let claims = validate_token(&params.token, &state.jwt_secret)?;
+    let token = extract_ws_token(&headers)?;
+    let claims = validate_token(&token, &state.jwt_secret)?;
 
     let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
         error!("JWT sub claim is not a valid UUID: {}", claims.sub);
@@ -53,18 +69,40 @@ pub async fn ws_handler(
         ));
     }
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user)))
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user, token)))
 }
 
 // Main WebSocket lifecycle handler.
-async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::user::User) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: Arc<ServerState>,
+    user: crate::user::User,
+    token: String,
+) {
     let manager = &state.connection_manager;
 
-    // Presence: mark user online.
-    let just_came_online = manager.user_connected(user.id);
+    // Per-connection channels (created first so we can send error messages).
+    let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<String>();
+
+    // Split the WebSocket into sender + receiver halves.
+    let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // Query all rooms the user belongs to.
-    let user_room_ids = get_user_room_ids(&state.pool, user.id).await;
+    let user_room_ids = match get_user_room_ids(&state.pool, user.id).await {
+        Ok(ids) => ids,
+        Err(error) => {
+            let err_msg = json!({
+                "type": WS_ERROR,
+                "data": { "message": error.to_string() }
+            })
+            .to_string();
+            let _ = ws_sender.send(Message::Text(err_msg.into())).await;
+            return;
+        }
+    };
+
+    // Presence: mark user online (only after rooms are loaded).
+    let just_came_online = manager.user_connected(user.id);
 
     if just_came_online {
         let online_msg = json!({
@@ -79,12 +117,6 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::
             manager.broadcast(room_id, &online_msg);
         }
     }
-
-    // Per-connection channels.
-    let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<String>();
-
-    // Split the WebSocket into sender + receiver halves.
-    let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // Track which rooms this connection is subscribed to.
     let mut subscribed_rooms: HashSet<Uuid> = HashSet::new();
@@ -111,6 +143,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.tick().await; // skip the immediate first tick
 
+    let mut msg_timestamps: VecDeque<Instant> = VecDeque::new();
+    const WS_RATE_LIMIT: usize = 30;
+    const WS_RATE_WINDOW: Duration = Duration::from_secs(10);
+
+    let mut re_validate = interval(Duration::from_secs(600));
+    re_validate.tick().await; // skip the immediate first tick
+
     // Main event loop
     loop {
         tokio::select! {
@@ -130,14 +169,33 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::
             msg = ws_receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let Err(e) = handle_incoming(
-                            &state, &user, &text,
-                        ).await {
+                        let now = Instant::now();
+                        while msg_timestamps.front().is_some_and(|t| now - *t > WS_RATE_WINDOW) {
+                            msg_timestamps.pop_front();
+                        }
+                        if msg_timestamps.len() >= WS_RATE_LIMIT {
                             let err_msg = json!({
                                 "type": WS_ERROR,
-                                "data": { "message": e.to_string() }
+                                "data": { "message": "Rate limit exceeded. Please slow down." }
                             }).to_string();
                             let _ = msg_tx.send(err_msg);
+                        } else {
+                            msg_timestamps.push_back(now);
+                            match handle_incoming(
+                                &state, &user, &text,
+                            ).await {
+                                Ok(Some(response)) => {
+                                    let _ = msg_tx.send(response);
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    let err_msg = json!({
+                                        "type": WS_ERROR,
+                                        "data": { "message": error.to_string() }
+                                    }).to_string();
+                                    let _ = msg_tx.send(err_msg);
+                                }
+                            }
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
@@ -145,18 +203,48 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>, user: crate::
                 }
             }
 
-            // Heartbeat: send PING every 30s. Client library auto-replies PONG.
-            // Failing to send means the connection (or TCP) is dead.
             _ = heartbeat.tick() => {
                 if ws_sender.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
             }
+
+            _ = re_validate.tick() => {
+                if validate_token(&token, &state.jwt_secret).is_err() {
+                    let err_msg = json!({
+                        "type": WS_ERROR,
+                        "data": { "message": "Token expired. Please reconnect." }
+                    }).to_string();
+                    let _ = msg_tx.send(err_msg);
+                    break;
+                }
+                match find_user_by_id(user.id, &state.pool).await {
+                    Ok(Some(u)) if u.is_active => {}
+                    Ok(_) => {
+                        let err_msg = json!({
+                            "type": WS_ERROR,
+                            "data": { "message": "Session expired. Please reconnect." }
+                        }).to_string();
+                        let _ = msg_tx.send(err_msg);
+                        break;
+                    }
+                    Err(error) => {
+                        error!("Re-validation DB error for user {}: {}", user.id, error);
+                        let err_msg = json!({
+                            "type": WS_ERROR,
+                            "data": { "message": "Internal server error. Will retry." }
+                        }).to_string();
+                        let _ = msg_tx.send(err_msg);
+                    }
+                }
+            }
         }
     }
 
-    // Cleanup
-    // subscribed_rooms and their forward tasks are dropped here implicitly.
+    // Cleanup: cancel all room subscriptions to clean up ConnectionManager.subs.
+    for &room_id in &subscribed_rooms {
+        manager.cancel_subscription(user.id, room_id);
+    }
 
     let fully_offline = manager.user_disconnected(user.id);
     if fully_offline {
@@ -206,11 +294,21 @@ fn subscribe_to_room(
                 msg = rx.recv() => {
                     match msg {
                         Ok(text) => {
+                            if is_own_typing_indicator(&text, user_id) {
+                                continue;
+                            }
                             if forward_tx.send(text).is_err() {
                                 break;
                             }
                         }
-                        Err(_) => break,
+                        Err(RecvError::Lagged(n)) => {
+                            warn!(
+                                "forward task lagged by {n} messages for user {user_id} in room {room_id}; continuing"
+                            );
+                            // Receiver is still valid — skipped messages are gone,
+                            // but future messages will still arrive.
+                        }
+                        Err(RecvError::Closed) => break,
                     }
                 }
             }
@@ -220,12 +318,45 @@ fn subscribe_to_room(
     subscribed_rooms.insert(room_id);
 }
 
+// Check whether a broadcast message is a typing indicator from the given user.
+// Used in forward tasks to avoid echoing a user's own typing events back to them.
+fn is_own_typing_indicator(message: &str, user_id: Uuid) -> bool {
+    let value: serde_json::Value = match serde_json::from_str(message) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let msg_type = match value.get("type").and_then(|v| v.as_str()) {
+        Some(t) => t,
+        None => return false,
+    };
+    if msg_type != WS_TYPING_INDICATOR {
+        return false;
+    }
+    match value
+        .get("data")
+        .and_then(|d| d.get("user_id"))
+        .and_then(|u| u.as_str())
+    {
+        Some(id_str) => {
+            let id = match Uuid::parse_str(id_str) {
+                Ok(id) => id,
+                Err(_) => return false,
+            };
+            id == user_id
+        }
+        None => false,
+    }
+}
+
 // Process a JSON message received from the client.
+// Returns Ok(None) for messages that need no response,
+// Ok(Some(response)) for ack messages to send back,
+// or Err(error) for errors to send back.
 async fn handle_incoming(
     state: &Arc<ServerState>,
     user: &crate::user::User,
     text: &str,
-) -> Result<(), ErrorResponse> {
+) -> Result<Option<String>, ErrorResponse> {
     let value: serde_json::Value = serde_json::from_str(text)
         .map_err(|e| ErrorResponse::Json(format!("Invalid WS message JSON: {}", e)))?;
 
@@ -255,31 +386,137 @@ async fn handle_incoming(
             })
             .to_string();
             state.connection_manager.broadcast(room_id, &typing_msg);
+
+            Ok(None)
         }
 
-        WS_PONG => {}
+        WS_PONG => Ok(None),
 
-        _ => {
-            return Err(ErrorResponse::Validation(format!(
-                "Unknown WS message type: '{}'.",
-                msg_type
-            )));
+        WS_SEND_MESSAGE => {
+            let current_user = find_user_by_id(user.id, &state.pool)
+                .await?
+                .ok_or_else(|| ErrorResponse::Authentication("User not found.".to_string()))?;
+            if !current_user.is_active {
+                return Err(ErrorResponse::Authentication(
+                    "User is inactive.".to_string(),
+                ));
+            }
+
+            let data = value.get("data").ok_or_else(|| {
+                ErrorResponse::Validation("Missing 'data' field in send_message.".to_string())
+            })?;
+
+            let room_id_str = data
+                .get("room_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    ErrorResponse::Validation("Missing 'room_id' in send_message data.".to_string())
+                })?;
+            let room_id = Uuid::parse_str(room_id_str)
+                .map_err(|_| ErrorResponse::Validation("Invalid room_id UUID.".to_string()))?;
+
+            let content = data
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    ErrorResponse::Validation("Missing 'content' in send_message data.".to_string())
+                })?;
+
+            let content = validate_message_content(content.to_string())?;
+
+            find_room_by_id(&state.pool, room_id).await?;
+
+            if !is_room_member(&state.pool, room_id, user.id).await? {
+                return Err(ErrorResponse::Forbidden(
+                    "You are not a member of this room.".to_string(),
+                ));
+            }
+
+            let message_id = Uuid::now_v7();
+            let now = Utc::now();
+
+            sqlx::query(
+                "INSERT INTO messages (id, room_id, sender_id, content, created_at) \
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(message_id)
+            .bind(room_id)
+            .bind(user.id)
+            .bind(&content)
+            .bind(now)
+            .execute(&state.pool)
+            .await
+            .map_err(|error| {
+                error!("Failed to insert message: {}", error);
+                ErrorResponse::InternalError("Failed to send message.".to_string())
+            })?;
+
+            let ws_message = json!({
+                "type": WS_NEW_MESSAGE,
+                "data": {
+                    "id": message_id,
+                    "room_id": room_id,
+                    "sender_id": user.id,
+                    "content": content,
+                    "created_at": now.to_rfc3339(),
+                }
+            })
+            .to_string();
+            state.connection_manager.broadcast(room_id, &ws_message);
+
+            let ack = json!({
+                "type": WS_MESSAGE_SENT,
+                "data": {
+                    "id": message_id,
+                    "room_id": room_id,
+                    "sender_id": user.id,
+                    "content": content,
+                    "created_at": now.to_rfc3339(),
+                }
+            })
+            .to_string();
+
+            Ok(Some(ack))
         }
+
+        _ => Err(ErrorResponse::Validation(format!(
+            "Unknown WS message type: '{}'.",
+            msg_type
+        ))),
     }
-
-    Ok(())
 }
 
 // Query all room IDs the user is a member of.
-async fn get_user_room_ids(pool: &sqlx::PgPool, user_id: Uuid) -> Vec<Uuid> {
-    let result =
-        sqlx::query_scalar::<_, Uuid>("SELECT room_id FROM room_members WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_all(pool)
-            .await;
+async fn get_user_room_ids(pool: &sqlx::PgPool, user_id: Uuid) -> Result<Vec<Uuid>, ErrorResponse> {
+    sqlx::query_scalar::<_, Uuid>("SELECT room_id FROM room_members WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| {
+            error!("Failed to query user rooms: {}", error);
+            ErrorResponse::Database("Failed to query user rooms.".to_string())
+        })
+}
 
-    result.unwrap_or_else(|error| {
-        error!("Failed to query user rooms: {}", error);
-        vec![]
-    })
+fn validate_message_content(content: String) -> Result<String, ErrorResponse> {
+    let sanitized: String = content
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .collect();
+
+    let trimmed = sanitized.trim().to_string();
+
+    if trimmed.is_empty() {
+        return Err(ErrorResponse::Validation(
+            "Message content cannot be empty.".to_string(),
+        ));
+    }
+
+    if trimmed.len() > 5000 {
+        return Err(ErrorResponse::Validation(
+            "Message content exceeds 5000 bytes.".to_string(),
+        ));
+    }
+
+    Ok(trimmed)
 }

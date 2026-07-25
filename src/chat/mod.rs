@@ -14,8 +14,7 @@ use uuid::Uuid;
 pub const ROLE_ADMIN: &str = "admin";
 pub const ROLE_MEMBER: &str = "member";
 
-// Check if it is a room that exists.
-#[allow(dead_code)]
+// Check if a user is a member of a room.
 pub async fn is_room_member(
     pool: &PgPool,
     room_id: Uuid,
@@ -32,6 +31,21 @@ pub async fn is_room_member(
         })?;
 
     Ok(row.is_some())
+}
+
+// Check that a room exists. Returns Ok(room_id) if it does, Err(NotFound) if it does not.
+pub async fn find_room_by_id(pool: &PgPool, room_id: Uuid) -> Result<Uuid, ErrorResponse> {
+    let row = sqlx::query("SELECT 1 FROM rooms WHERE id = $1")
+        .bind(room_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| {
+            error!("Failed to look up room: {}", error);
+            ErrorResponse::InternalError("Failed to look up room.".to_string())
+        })?;
+
+    row.map(|_| room_id)
+        .ok_or_else(|| ErrorResponse::NotFound("Room not found.".to_string()))
 }
 
 // Check if a user is an admin of a group room.
@@ -173,10 +187,7 @@ pub fn router(state: Arc<ServerState>) -> Router<Arc<ServerState>> {
             "/rooms/{room_id}/members/{user_id}",
             axum::routing::delete(member::remove_member),
         )
-        .route(
-            "/rooms/{room_id}/messages",
-            get(message::get_messages).post(message::send_message),
-        )
+        .route("/rooms/{room_id}/messages", get(message::get_messages))
         .route_layer(axum::middleware::from_fn_with_state(
             state,
             crate::middleware::authenticate::authenticate,

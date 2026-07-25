@@ -1,12 +1,11 @@
 use crate::ServerState;
-use crate::chat::is_room_member;
+use crate::chat::{find_room_by_id, is_room_member};
 use crate::common::error::ErrorResponse;
 use crate::common::success::SuccessResponse;
 use crate::middleware::authenticate::AuthenticatedUser;
 use axum::Extension;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::{Json, extract::rejection::JsonRejection};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
@@ -16,72 +15,9 @@ use tracing::error;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
-pub struct SendMessageRequest {
-    pub content: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct GetMessagesQuery {
     pub limit: Option<i64>,
     pub before: Option<Uuid>,
-}
-
-pub async fn send_message(
-    State(state): State<Arc<ServerState>>,
-    Extension(auth_user): Extension<AuthenticatedUser>,
-    Path(room_id): Path<Uuid>,
-    body: Result<Json<SendMessageRequest>, JsonRejection>,
-) -> Result<SuccessResponse, ErrorResponse> {
-    let Json(request) = body.map_err(|error| ErrorResponse::Json(error.to_string()))?;
-
-    if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
-        return Err(ErrorResponse::Forbidden(
-            "You are not a member of this room.".to_string(),
-        ));
-    }
-
-    let message_id = Uuid::now_v7();
-    let now = Utc::now();
-
-    sqlx::query(
-        "INSERT INTO messages (id, room_id, sender_id, content, created_at) VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(message_id)
-    .bind(room_id)
-    .bind(auth_user.user_id)
-    .bind(&request.content)
-    .bind(now)
-    .execute(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to insert message: {}", error);
-        ErrorResponse::InternalError("Failed to send message.".to_string())
-    })?;
-
-    let ws_message = json!({
-        "type": "new_message",
-        "data": {
-            "id": message_id,
-            "room_id": room_id,
-            "sender_id": auth_user.user_id,
-            "content": request.content,
-            "created_at": now.to_rfc3339(),
-        }
-    })
-    .to_string();
-    state.connection_manager.broadcast(room_id, &ws_message);
-
-    Ok(SuccessResponse::new(
-        StatusCode::CREATED,
-        "Message sent successfully.".to_string(),
-        json!({
-            "id": message_id,
-            "room_id": room_id,
-            "sender_id": auth_user.user_id,
-            "content": request.content,
-            "created_at": now.to_rfc3339(),
-        }),
-    ))
 }
 
 pub async fn get_messages(
@@ -90,6 +26,8 @@ pub async fn get_messages(
     Path(room_id): Path<Uuid>,
     Query(params): Query<GetMessagesQuery>,
 ) -> Result<SuccessResponse, ErrorResponse> {
+    find_room_by_id(&state.pool, room_id).await?;
+
     if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
         return Err(ErrorResponse::Forbidden(
             "You are not a member of this room.".to_string(),
