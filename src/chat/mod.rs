@@ -1,3 +1,4 @@
+pub(crate) mod encrypted;
 mod member;
 mod message;
 mod room;

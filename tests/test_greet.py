@@ -1,4 +1,14 @@
+import tomllib
+from pathlib import Path
+
 import requests
+
+
+def _server_version() -> str:
+    cargo_toml = Path(__file__).resolve().parent.parent / "Cargo.toml"
+    with open(cargo_toml, "rb") as file:
+        data = tomllib.load(file)
+    return data["package"]["version"]
 
 
 class TestGreet:
@@ -7,5 +17,5 @@ class TestGreet:
         assert resp.status_code == 200
 
         body = resp.json()
-        assert body["server_version"] == "0.1.0"
+        assert body["server_version"] == _server_version()
         assert body["api_version"] == "v1"
