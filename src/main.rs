@@ -13,7 +13,7 @@ mod user;
 mod websocket;
 
 use anyhow::Result;
-use infrastructure::config::AppConfigure;
+use infrastructure::config::ServerConfiguration;
 use infrastructure::environment::Environment;
 use infrastructure::initialize;
 use sqlx::PgPool;
@@ -30,7 +30,7 @@ pub struct Directory {
 
 #[derive(Clone)]
 pub struct ServerState {
-    pub configure: AppConfigure,
+    pub configure: ServerConfiguration,
     pub pool: PgPool,
     pub jwt_secret: String,
     pub environment: Environment,
@@ -40,7 +40,7 @@ pub struct ServerState {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Determine the production/development environment.
-    let env = Environment::from_env();
+    let env = Environment::from_environment();
 
     if env.is_development() {
         let _ = dotenvy::dotenv();

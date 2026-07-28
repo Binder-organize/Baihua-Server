@@ -25,9 +25,9 @@ async fn validate_json_body(
         ));
     }
 
-    let max_size = if Environment::from_env().is_production() {
+    let max_size = if Environment::from_environment().is_production() {
         MAX_BODY_SIZE_PRODUCTION
-    } else if Environment::from_env().is_development() {
+    } else if Environment::from_environment().is_development() {
         MAX_BODY_SIZE_DEVELOPMENT
     } else {
         unreachable!()

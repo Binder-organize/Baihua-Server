@@ -1,5 +1,5 @@
 use crate::Directory;
-use crate::infrastructure::config::AppConfigure;
+use crate::infrastructure::config::ServerConfiguration;
 use crate::infrastructure::environment::Environment;
 use tracing::subscriber::set_global_default;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
@@ -11,7 +11,7 @@ use tracing_subscriber::{
 
 pub fn init_log(
     directory: &Directory,
-    configure: &AppConfigure,
+    configure: &ServerConfiguration,
     env: Environment,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard, Box<dyn std::error::Error>> {
     let logs_dir = directory.log.clone();

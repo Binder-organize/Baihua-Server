@@ -2,23 +2,23 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppConfigure {
-    pub server: ServerConfigure,
-    pub log: LogConfigure,
-    pub database: DatabaseConfigure,
-    pub user: UserConfigure,
+pub struct ServerConfiguration {
+    pub server: WebConfiguration,
+    pub log: LogsConfiguration,
+    pub database: DatabaseConfiguration,
+    pub user: UserConfiguration,
 }
 
 // Server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerConfigure {
+pub struct WebConfiguration {
     pub host: String,
     pub port: u16,
 }
 
 // Log configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogConfigure {
+pub struct LogsConfiguration {
     #[serde(default = "default_log_level")]
     pub level: String, // default: info
 }
@@ -28,7 +28,7 @@ pub struct LogConfigure {
 // hardcoding credentials in config files. See .env.example for the
 // required POSTGRES_* variables.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseConfigure {
+pub struct DatabaseConfiguration {
     #[serde(default = "default_max_connections")]
     pub max_connections: u32, // default: 20
 
@@ -37,7 +37,7 @@ pub struct DatabaseConfigure {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserConfigure {
+pub struct UserConfiguration {
     #[serde(default = "default_username_length")]
     pub minimum_username_length: u32, // default: 3
 
@@ -69,21 +69,21 @@ fn default_jsonwebtoken_expiration_hours() -> u32 {
     24
 }
 
-impl Default for AppConfigure {
+impl Default for ServerConfiguration {
     fn default() -> Self {
         Self {
-            server: ServerConfigure {
+            server: WebConfiguration {
                 host: "127.0.0.1".to_string(),
                 port: 2424,
             },
-            log: LogConfigure {
+            log: LogsConfiguration {
                 level: default_log_level(),
             },
-            database: DatabaseConfigure {
+            database: DatabaseConfiguration {
                 max_connections: default_max_connections(),
                 min_connections: default_min_connections(),
             },
-            user: UserConfigure {
+            user: UserConfiguration {
                 minimum_username_length: default_username_length(),
                 maximum_username_length: default_maximum_username_length(),
                 jsonwebtoken_expiration_hours: default_jsonwebtoken_expiration_hours(),
@@ -92,7 +92,7 @@ impl Default for AppConfigure {
     }
 }
 
-impl AppConfigure {
+impl ServerConfiguration {
     pub fn validate(&self) -> Result<()> {
         // validate the profile information.
         if self.server.port == 0 {
