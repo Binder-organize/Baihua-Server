@@ -150,17 +150,19 @@ async fn handle_socket(
     .to_string();
     let _ = msg_tx.send(connected_msg);
 
-    // Heartbeat: send WebSocket protocol-level PING every 30 seconds.
+    let ws_config = &state.configuration.websocket;
+
+    // Heartbeat: send WebSocket protocol-level PING frames.
     // The client library auto-responds with PONG at the frame level.
     // If the send fails, the connection is dead and we break.
-    let mut heartbeat = interval(Duration::from_secs(30));
+    let mut heartbeat = interval(Duration::from_secs(ws_config.heartbeat_interval_secs));
     heartbeat.tick().await; // skip the immediate first tick
 
     let mut msg_timestamps: VecDeque<Instant> = VecDeque::new();
-    const WS_RATE_LIMIT: usize = 30;
-    const WS_RATE_WINDOW: Duration = Duration::from_secs(10);
 
-    let mut re_validate = interval(Duration::from_secs(600));
+    let mut re_validate = interval(Duration::from_secs(
+        ws_config.token_revalidate_interval_secs,
+    ));
     re_validate.tick().await; // skip the immediate first tick
 
     // Main event loop
@@ -183,10 +185,11 @@ async fn handle_socket(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         let now = Instant::now();
-                        while msg_timestamps.front().is_some_and(|t| now - *t > WS_RATE_WINDOW) {
+                        let rate_window = Duration::from_secs(ws_config.message_rate_window_secs);
+                        while msg_timestamps.front().is_some_and(|t| now - *t > rate_window) {
                             msg_timestamps.pop_front();
                         }
-                        if msg_timestamps.len() >= WS_RATE_LIMIT {
+                        if msg_timestamps.len() >= ws_config.message_rate_limit as usize {
                             let err_msg = json!({
                                 "type": WS_ERROR,
                                 "data": { "message": "Rate limit exceeded. Please slow down." }

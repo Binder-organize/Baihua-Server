@@ -25,8 +25,12 @@ pub async fn get_pool(
     sqlx::postgres::PgPoolOptions::new()
         .max_connections(config.max_connections)
         .min_connections(config.min_connections)
-        .idle_timeout(std::time::Duration::from_secs(600))
-        .max_lifetime(std::time::Duration::from_secs(3600))
+        .idle_timeout(std::time::Duration::from_secs(
+            config.pool_idle_timeout_secs,
+        ))
+        .max_lifetime(std::time::Duration::from_secs(
+            config.pool_max_lifetime_secs,
+        ))
         .connect(&url)
         .await
         .context("Failed to connect to database.")

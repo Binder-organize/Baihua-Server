@@ -1,23 +1,32 @@
+use crate::ServerState;
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::LazyLock;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 
-struct SlidingWindowRateLimiter {
+pub(crate) struct SlidingWindowRateLimiter {
     max_requests: u32,
     window_secs: u64,
     inner: RwLock<HashMap<IpAddr, Vec<Instant>>>,
 }
 
 impl SlidingWindowRateLimiter {
+    pub fn new(max_requests: u32, window_secs: u64) -> Self {
+        Self {
+            max_requests,
+            window_secs,
+            inner: RwLock::new(HashMap::new()),
+        }
+    }
+
     // Returns true if the request should be allowed, false if rate limited.
-    async fn allow(&self, ip: IpAddr) -> bool {
+    pub(crate) async fn allow(&self, ip: IpAddr) -> bool {
         let mut map = self.inner.write().await;
         let now = Instant::now();
         let window = std::time::Duration::from_secs(self.window_secs);
@@ -35,22 +44,6 @@ impl SlidingWindowRateLimiter {
         true
     }
 }
-
-// Login rate limiter: 60 requests per 60 seconds per IP.
-static LOGIN_LIMITER: LazyLock<SlidingWindowRateLimiter> =
-    LazyLock::new(|| SlidingWindowRateLimiter {
-        max_requests: 60,
-        window_secs: 60,
-        inner: RwLock::new(HashMap::new()),
-    });
-
-// Register rate limiter: 30 requests per 60 seconds per IP.
-static REGISTER_LIMITER: LazyLock<SlidingWindowRateLimiter> =
-    LazyLock::new(|| SlidingWindowRateLimiter {
-        max_requests: 30,
-        window_secs: 60,
-        inner: RwLock::new(HashMap::new()),
-    });
 
 fn extract_client_ip(request: &Request) -> Option<IpAddr> {
     // Priority 1: X-Forwarded-For (standard reverse proxy header).
@@ -73,9 +66,13 @@ fn extract_client_ip(request: &Request) -> Option<IpAddr> {
     None
 }
 
-pub async fn rate_limit_login(request: Request, next: Next) -> Response {
+pub async fn rate_limit_login(
+    state: State<Arc<ServerState>>,
+    request: Request,
+    next: Next,
+) -> Response {
     if let Some(ip) = extract_client_ip(&request)
-        && !LOGIN_LIMITER.allow(ip).await
+        && !state.login_rate_limiter.allow(ip).await
     {
         let response = crate::common::StandardResponse::error(
             axum::http::StatusCode::TOO_MANY_REQUESTS,
@@ -88,9 +85,13 @@ pub async fn rate_limit_login(request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
-pub async fn rate_limit_register(request: Request, next: Next) -> Response {
+pub async fn rate_limit_register(
+    state: State<Arc<ServerState>>,
+    request: Request,
+    next: Next,
+) -> Response {
     if let Some(ip) = extract_client_ip(&request)
-        && !REGISTER_LIMITER.allow(ip).await
+        && !state.register_rate_limiter.allow(ip).await
     {
         let response = crate::common::StandardResponse::error(
             axum::http::StatusCode::TOO_MANY_REQUESTS,

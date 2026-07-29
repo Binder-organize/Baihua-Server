@@ -11,11 +11,11 @@ use tracing_subscriber::{
 
 pub fn init_log(
     directory: &Directory,
-    configure: &ServerConfiguration,
+    configuration: &ServerConfiguration,
     env: Environment,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard, Box<dyn std::error::Error>> {
     let logs_dir = directory.log.clone();
-    let config = &configure.log;
+    let config = &configuration.logs;
 
     // Create a log directory.
     let file_appender = RollingFileAppender::builder()

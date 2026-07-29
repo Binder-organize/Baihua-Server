@@ -35,7 +35,7 @@ pub async fn login(
 
     let token = generate_token(
         &state.jwt_secret,
-        state.configure.user.jsonwebtoken_expiration_hours,
+        state.configuration.user.jsonwebtoken_expiration_hours,
         &user.id.to_string(),
     )
     .await?;

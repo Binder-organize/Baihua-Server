@@ -16,6 +16,7 @@ use anyhow::Result;
 use infrastructure::config::ServerConfiguration;
 use infrastructure::environment::Environment;
 use infrastructure::initialize;
+use middleware::rate_limit::SlidingWindowRateLimiter;
 use sqlx::PgPool;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,27 +31,29 @@ pub struct Directory {
 
 #[derive(Clone)]
 pub struct ServerState {
-    pub configure: ServerConfiguration,
+    pub configuration: ServerConfiguration,
     pub pool: PgPool,
     pub jwt_secret: String,
     pub environment: Environment,
     pub connection_manager: Arc<ConnectionManager>,
+    pub(crate) login_rate_limiter: Arc<SlidingWindowRateLimiter>,
+    pub(crate) register_rate_limiter: Arc<SlidingWindowRateLimiter>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Determine the production/development environment.
-    let env = Environment::from_environment();
+    let environment = Environment::from_environment();
 
-    if env.is_development() {
+    if environment.is_development() {
         let _ = dotenvy::dotenv();
     }
 
     println!(
         "Baihua Server - v0.1.3 ({})",
-        if env.is_production() {
+        if environment.is_production() {
             "production"
-        } else if env.is_development() {
+        } else if environment.is_development() {
             "development"
         } else {
             unreachable!()
@@ -58,17 +61,20 @@ async fn main() -> Result<()> {
     );
 
     // Initialize the server.
-    let (state, log_guard) = match initialize::initialize(env).await {
+    let (state, log_guard) = match initialize::initialize(environment).await {
         Ok((server_state, guard)) => (server_state, guard),
         Err(error) => {
-            eprintln!("Server initialization failed: {}.", error);
+            eprintln!(
+                "\x1b[31mInitialize Error:\x1b[0m Server initialization failed: {}",
+                error
+            );
             return Err(error);
         }
     };
 
     info!(
         "Server address: {}:{}.",
-        state.configure.server.host, state.configure.server.port
+        state.configuration.web.host, state.configuration.web.port
     );
 
     let (command_tx, command_rx) = tokio::sync::mpsc::channel::<console::CommandType>(32);

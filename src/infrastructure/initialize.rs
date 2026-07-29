@@ -4,6 +4,7 @@ use crate::infrastructure::config::ServerConfiguration;
 use crate::infrastructure::database::get_pool;
 use crate::infrastructure::environment::Environment;
 use crate::infrastructure::log;
+use crate::middleware::rate_limit::SlidingWindowRateLimiter;
 use crate::websocket::connection::ConnectionManager;
 use anyhow::{Context, Result, anyhow};
 use dirs::home_dir;
@@ -73,12 +74,23 @@ pub async fn initialize(
 
     info!("Initialization completed.");
 
+    let login_rate_limiter = Arc::new(SlidingWindowRateLimiter::new(
+        configuration.rate_limit.login_max_requests,
+        configuration.rate_limit.login_window_secs,
+    ));
+    let register_rate_limiter = Arc::new(SlidingWindowRateLimiter::new(
+        configuration.rate_limit.register_max_requests,
+        configuration.rate_limit.register_window_secs,
+    ));
+
     let state = ServerState {
-        configure: configuration,
+        configuration,
         pool,
         jwt_secret,
         environment,
         connection_manager: Arc::new(ConnectionManager::new()),
+        login_rate_limiter,
+        register_rate_limiter,
     };
 
     Ok((state, guard))
@@ -116,8 +128,7 @@ async fn load_or_create_profile(app_directory: &Path) -> Result<ServerConfigurat
         Ok(configuration)
     } else {
         let configuration = ServerConfiguration::default();
-        let toml_content = toml::to_string_pretty(&configuration)
-            .context("Serialization configuration failed.")?;
+        let toml_content = ServerConfiguration::default_config_content();
 
         fs::write(&profile_path, toml_content)
             .await

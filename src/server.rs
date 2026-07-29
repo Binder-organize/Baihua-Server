@@ -30,7 +30,7 @@ pub async fn server(
     // read IP addresses.
     let address = format!(
         "{}:{}",
-        state.configure.server.host, state.configure.server.port
+        state.configuration.web.host, state.configuration.web.port
     );
     let listener = tokio::net::TcpListener::bind(&address).await?;
 

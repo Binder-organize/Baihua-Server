@@ -265,20 +265,24 @@ pub fn router(state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
         .route(
             "/register",
             axum::routing::post(register::register)
-                .route_layer(axum::middleware::from_fn(
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
                     middleware::validate::validate_register,
                 ))
-                .route_layer(axum::middleware::from_fn(
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
                     middleware::rate_limit::rate_limit_register,
                 )),
         )
         .route(
             "/login",
             axum::routing::post(login::login)
-                .route_layer(axum::middleware::from_fn(
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
                     middleware::validate::validate_login,
                 ))
-                .route_layer(axum::middleware::from_fn(
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
                     middleware::rate_limit::rate_limit_login,
                 )),
         );
