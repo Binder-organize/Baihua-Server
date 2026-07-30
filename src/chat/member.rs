@@ -1,6 +1,6 @@
 use crate::ServerState;
+use crate::common::StandardResponse;
 use crate::common::error::ErrorResponse;
-use crate::common::success::SuccessResponse;
 use crate::middleware::authenticate::AuthenticatedUser;
 use crate::user::find_user_by_username;
 use axum::Extension;
@@ -29,7 +29,7 @@ pub async fn add_members(
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(room_id): Path<Uuid>,
     body: Result<Json<AddMembersRequest>, JsonRejection>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     let Json(request) = body.map_err(|error| ErrorResponse::Json(error.to_string()))?;
 
     if request.usernames.is_empty() {
@@ -98,7 +98,7 @@ pub async fn add_members(
         }));
     }
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Members added successfully.".to_string(),
         json!({
@@ -113,7 +113,7 @@ pub async fn list_members(
     State(state): State<Arc<ServerState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(room_id): Path<Uuid>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     // Verify the requester is a room member.
     if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
         return Err(ErrorResponse::Forbidden(
@@ -149,7 +149,7 @@ pub async fn list_members(
         })
         .collect();
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Members listed successfully.".to_string(),
         json!({
@@ -168,7 +168,7 @@ pub async fn remove_member(
     State(state): State<Arc<ServerState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path((room_id, target_user_id)): Path<(Uuid, Uuid)>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     // Verify the requester is a room member.
     if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
         return Err(ErrorResponse::Forbidden(
@@ -203,7 +203,7 @@ async fn handle_leave(
     room_id: Uuid,
     user_id: Uuid,
     is_group: bool,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     // Guard: verify the user is actually a member of this room.
     if !is_room_member(&state.pool, room_id, user_id).await? {
         return Err(ErrorResponse::Forbidden(
@@ -228,7 +228,7 @@ async fn handle_leave(
             .connection_manager
             .cancel_subscription(user_id, room_id);
 
-        return Ok(SuccessResponse::new(
+        return Ok(StandardResponse::success(
             StatusCode::OK,
             "You left the room. The room has been deleted as you were the last member.".to_string(),
             json!({
@@ -259,7 +259,7 @@ async fn handle_leave(
         .connection_manager
         .cancel_subscription(user_id, room_id);
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "You have left the room.".to_string(),
         json!({
@@ -277,7 +277,7 @@ async fn handle_kick(
     actor_id: Uuid,
     target_user_id: Uuid,
     is_group: bool,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     // Kicking is only allowed in group rooms.
     if !is_group {
         return Err(ErrorResponse::Forbidden(
@@ -322,7 +322,7 @@ async fn handle_kick(
         auto_promote_admin(&state.pool, room_id, target_user_id).await?;
     }
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Member removed successfully.".to_string(),
         json!({

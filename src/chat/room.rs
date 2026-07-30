@@ -1,6 +1,6 @@
 use crate::ServerState;
+use crate::common::StandardResponse;
 use crate::common::error::ErrorResponse;
-use crate::common::success::SuccessResponse;
 use crate::middleware::authenticate::AuthenticatedUser;
 use crate::user::find_user_by_username;
 use axum::Extension;
@@ -42,7 +42,7 @@ pub async fn create_or_get_room(
     State(state): State<Arc<ServerState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     body: Result<Json<CreateRoomRequest>, JsonRejection>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     let Json(request) = body.map_err(|error| ErrorResponse::Json(error.to_string()))?;
 
     if request.is_group {
@@ -57,7 +57,7 @@ async fn create_group_room(
     state: &Arc<ServerState>,
     auth_user: &AuthenticatedUser,
     request: &CreateRoomRequest,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     let name = request.name.as_ref().ok_or(ErrorResponse::BadRequest(
         "Group room name is required.".to_string(),
     ))?;
@@ -154,7 +154,7 @@ async fn create_group_room(
         ErrorResponse::InternalError("Failed to commit transaction.".to_string())
     })?;
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::CREATED,
         "Group room created successfully.".to_string(),
         json!({
@@ -173,7 +173,7 @@ async fn create_private_room(
     state: &Arc<ServerState>,
     auth_user: &AuthenticatedUser,
     request: &CreateRoomRequest,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     let username = request.username.as_ref().ok_or(ErrorResponse::BadRequest(
         "Target username is required for private chat.".to_string(),
     ))?;
@@ -215,7 +215,7 @@ async fn create_private_room(
     if let Some(row) = existing {
         let room_id: Uuid = row.get("id");
         let members = vec![auth_user.user_id, target_user.id];
-        return Ok(SuccessResponse::new(
+        return Ok(StandardResponse::success(
             StatusCode::OK,
             "Room already exists.".to_string(),
             json!({
@@ -275,7 +275,7 @@ async fn create_private_room(
         ErrorResponse::InternalError("Failed to commit transaction.".to_string())
     })?;
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::CREATED,
         "Room created successfully.".to_string(),
         json!({
@@ -295,7 +295,7 @@ pub async fn get_room_detail(
     State(state): State<Arc<ServerState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(room_id): Path<Uuid>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     crate::chat::find_room_by_id(&state.pool, room_id).await?;
 
     if !crate::chat::is_room_member(&state.pool, room_id, auth_user.user_id).await? {
@@ -347,7 +347,7 @@ pub async fn get_room_detail(
 
     let member_count = members.len() as i64;
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Room detail retrieved successfully.".to_string(),
         json!({
@@ -368,7 +368,7 @@ pub async fn get_room_detail(
 pub async fn list_rooms(
     State(state): State<Arc<ServerState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     // Query 1: rooms the user belongs to, with member count and last message preview.
     let room_rows = sqlx::query(
         "SELECT r.id, r.name, r.created_by, r.created_at, r.is_group, r.is_encrypted, rm.role, \
@@ -459,7 +459,7 @@ pub async fn list_rooms(
         }));
     }
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Rooms listed successfully.".to_string(),
         json!({ "rooms": rooms }),

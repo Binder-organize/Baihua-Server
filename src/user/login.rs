@@ -1,7 +1,7 @@
 use crate::ServerState;
 use crate::authenticate::jsonwebtoken::generate_token;
+use crate::common::StandardResponse;
 use crate::common::error::ErrorResponse;
-use crate::common::success::SuccessResponse;
 use crate::user::{UserLogin, find_user_with_password};
 use axum::extract::rejection::JsonRejection;
 use axum::{Json, extract::State, http::StatusCode};
@@ -13,7 +13,7 @@ use tracing::{error, info};
 pub async fn login(
     State(state): State<Arc<ServerState>>,
     user: Result<Json<UserLogin>, JsonRejection>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     let Json(user_login) = user.map_err(|error| ErrorResponse::Json(error.to_string()))?;
 
     let Some((user, password_hash)) =
@@ -56,7 +56,7 @@ pub async fn login(
         );
     }
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "User logged in successfully.".to_string(),
         json!({

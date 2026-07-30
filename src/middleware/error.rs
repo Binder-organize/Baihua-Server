@@ -24,10 +24,10 @@ pub async fn panic(request: Request, next: Next) -> Response {
 
             error!(
                 "The server used 'panic!', returned an 'HTTP 500' error, ID: {}",
-                error.response.response_id
+                error.body.response_id
             );
 
-            (error.status, Json(error.response)).into_response()
+            (error.status, Json(error.body)).into_response()
         }
     }
 }
@@ -43,7 +43,7 @@ pub async fn not_found(request: Request, next: Next) -> Response {
             "The requested resource was not found.".to_string(),
         );
 
-        return (error.status, Json(error.response)).into_response();
+        return (error.status, Json(error.body)).into_response();
     }
 
     response

@@ -1,4 +1,5 @@
 use crate::ServerState;
+use crate::common::error::ErrorResponse;
 use axum::{
     extract::{Request, State},
     middleware::Next,
@@ -74,12 +75,10 @@ pub async fn rate_limit_login(
     if let Some(ip) = extract_client_ip(&request)
         && !state.login_rate_limiter.allow(ip).await
     {
-        let response = crate::common::StandardResponse::error(
-            axum::http::StatusCode::TOO_MANY_REQUESTS,
-            "RATE_LIMIT_ERROR".to_string(),
+        return ErrorResponse::TooManyRequests(
             "Too many login attempts. Please try again later.".to_string(),
-        );
-        return (response.status, axum::Json(response.response)).into_response();
+        )
+        .into_response();
     }
 
     next.run(request).await
@@ -93,12 +92,10 @@ pub async fn rate_limit_register(
     if let Some(ip) = extract_client_ip(&request)
         && !state.register_rate_limiter.allow(ip).await
     {
-        let response = crate::common::StandardResponse::error(
-            axum::http::StatusCode::TOO_MANY_REQUESTS,
-            "RATE_LIMIT_ERROR".to_string(),
+        return ErrorResponse::TooManyRequests(
             "Too many registration attempts. Please try again later.".to_string(),
-        );
-        return (response.status, axum::Json(response.response)).into_response();
+        )
+        .into_response();
     }
 
     next.run(request).await

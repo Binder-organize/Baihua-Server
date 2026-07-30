@@ -10,10 +10,16 @@ use std::sync::Arc;
 use tracing::info;
 
 pub async fn server(
-    mut command_rx: tokio::sync::mpsc::Receiver<CommandType>,
+    command_rx: Option<tokio::sync::mpsc::Receiver<CommandType>>,
+    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
     state: ServerState,
 ) -> Result<(), anyhow::Error> {
-    info!("The server is started.");
+    let address = format!(
+        "{}:{}",
+        state.configuration.web.host, state.configuration.web.port
+    );
+
+    info!("Server running at {}.", &address);
 
     let state = Arc::new(state);
 
@@ -27,18 +33,25 @@ pub async fn server(
         .layer(axum::middleware::from_fn(middleware::error::not_found))
         .with_state(state.clone());
 
-    // read IP addresses.
-    let address = format!(
-        "{}:{}",
-        state.configuration.web.host, state.configuration.web.port
-    );
     let listener = tokio::net::TcpListener::bind(&address).await?;
 
-    // Setup graceful shutdown handler (SIGINT + SIGTERM)
+    // Shutdown triggered by main.rs (OS signal) or console command.
     let shutdown_handler = async move {
+        // If no command channel exists (production), this future never resolves.
+        let command_future = async {
+            let mut rx = match command_rx {
+                Some(rx) => rx,
+                None => std::future::pending().await,
+            };
+            rx.recv().await
+        };
+
         tokio::select! {
-            command = command_rx.recv() => {
-                match command {
+            _ = &mut shutdown_rx => {
+                info!("Received OS shutdown signal.");
+            }
+            reason = command_future => {
+                match reason {
                     Some(CommandType::Shutdown) => {
                         info!("Received shutdown command from console.");
                     }
@@ -47,18 +60,15 @@ pub async fn server(
                     }
                 }
             }
-            _ = crate::shutdown_signal() => {
-                info!("Received OS shutdown signal.");
-            }
         }
     };
 
-    // Start the server with graceful shutdown and proper error handling
+    // Start the server with graceful shutdown and proper error handling.
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_handler)
         .await?;
 
-    info!("Server shutdown completed successfully");
+    info!("Server shut down.");
     Ok(())
 }
 

@@ -1,4 +1,5 @@
-use crate::common::{ApiResponse, StandardResponse};
+use crate::common::StandardResponse;
+use crate::infrastructure::environment::Environment;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -69,10 +70,10 @@ impl ErrorResponse {
     // In production, internal and database errors return a generic message
     // to avoid leaking implementation details.
     fn client_message(&self) -> String {
-        let is_prod = std::env::var("BAIHUA_ENV").as_deref() == Ok("production");
+        let is_production = Environment::from_environment().is_production();
         match self {
             ErrorResponse::InternalError(_) | ErrorResponse::Database(_) => {
-                if is_prod {
+                if is_production {
                     "An internal error occurred. Please try again later.".to_string()
                 } else {
                     self.to_string()
@@ -81,10 +82,8 @@ impl ErrorResponse {
             _ => self.to_string(),
         }
     }
-}
 
-impl ApiResponse for ErrorResponse {
-    fn to_response(self) -> StandardResponse {
+    fn to_response(&self) -> StandardResponse {
         StandardResponse::error(
             self.status_code(),
             self.error_code().to_string(),
@@ -100,28 +99,27 @@ impl IntoResponse for ErrorResponse {
         // Log error.
         if response.status.is_server_error() {
             warn!(
-                "The server returns a error: HTTP status code: 'INTERNAL_SERVER_ERROR', error code: '{}', message: '{}', ID: '{}'.",
-                response.response.error_code,
-                response.response.message,
-                response.response.response_id
+                "Server returned an error: HTTP status code: 'INTERNAL_SERVER_ERROR', error code: '{}', message: '{}', ID: '{}'.",
+                response.body.code, response.body.message, response.body.response_id
             );
         } else {
             info!(
-                "The server returns a error: HTTP status code: '{}', error code: '{}', message: '{}', ID: '{}'.",
+                "Server returned an error: HTTP status code: '{}', error code: '{}', message: '{}', ID: '{}'.",
                 response.status,
-                response.response.error_code,
-                response.response.message,
-                response.response.response_id
+                response.body.code,
+                response.body.message,
+                response.body.response_id
             );
         }
 
-        (response.status, Json(response.response)).into_response()
+        (response.status, Json(response.body)).into_response()
     }
 }
-
+/*
 // Error type is converted to Response.
 impl From<ErrorResponse> for Response {
     fn from(error: ErrorResponse) -> Self {
         error.into_response()
     }
 }
+*/

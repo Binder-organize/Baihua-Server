@@ -1,6 +1,6 @@
 use crate::ServerState;
+use crate::common::StandardResponse;
 use crate::common::error::ErrorResponse;
-use crate::common::success::SuccessResponse;
 use crate::user::User;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -12,7 +12,7 @@ use tracing::error;
 // Get the user list.
 pub async fn list_users(
     State(state): State<Arc<ServerState>>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     let rows = sqlx::query(
         r#"SELECT id, username, email, nickname, phone_number, created_at, is_active
            FROM users WHERE is_active = true ORDER BY created_at DESC"#,
@@ -37,7 +37,7 @@ pub async fn list_users(
         })
         .collect();
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Users retrieved successfully.".to_string(),
         json!({ "users": users }),

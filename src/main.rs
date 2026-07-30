@@ -53,10 +53,8 @@ async fn main() -> Result<()> {
         "Baihua Server - v0.1.3 ({})",
         if environment.is_production() {
             "production"
-        } else if environment.is_development() {
-            "development"
         } else {
-            unreachable!()
+            "development"
         }
     );
 
@@ -77,66 +75,44 @@ async fn main() -> Result<()> {
         state.configuration.web.host, state.configuration.web.port
     );
 
-    let (command_tx, command_rx) = tokio::sync::mpsc::channel::<console::CommandType>(32);
-    let server_handle = tokio::spawn(server::server(command_rx, state.clone()));
+    // server.rs receives notification for graceful shutdown.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-    let shutdown_reason = if state.environment.is_development() {
-        let console_handle = tokio::spawn(console::console(command_tx));
-
-        tokio::select! {
-            reason = console_handle => {
-                match reason {
-                    Ok(()) => "Console requested shutdown.",
-                    Err(error) => {
-                        error!("Console task failed: {}", error);
-                        "Console task failed"
-                    }
-                }
-            }
-            reason = server_handle => {
-                match reason {
-                    Ok(Ok(())) => "Server completed successfully.",
-                    Ok(Err(error)) => {
-                        error!("Server task failed: {}.", error);
-                        "Server task failed."
-                    }
-                    Err(error) => {
-                        error!("Server task panicked: {}.", error);
-                        "Server task panicked."
-                    }
-                }
-            }
-            _ = shutdown_signal() => {
-                "Received shutdown signal."
-            }
-        }
-    } else if state.environment.is_production() {
-        info!("Console disabled in production mode.");
-        let _command_tx = command_tx;
-
-        tokio::select! {
-            reason = server_handle => {
-                match reason {
-                    Ok(Ok(())) => "Server completed successfully.",
-                    Ok(Err(error)) => {
-                        error!("Server task failed: {}.", error);
-                        "Server task failed."
-                    }
-                    Err(error) => {
-                        error!("Server task panicked: {}.", error);
-                        "Server task panicked."
-                    }
-                }
-            }
-            _ = shutdown_signal() => {
-                "Received shutdown signal."
-            }
-        }
+    let mut server_handle = if state.environment.is_development() {
+        let (command_tx, command_rx) = tokio::sync::mpsc::channel::<console::CommandType>(32);
+        tokio::spawn(console::console(command_tx));
+        tokio::spawn(server::server(Some(command_rx), shutdown_rx, state.clone()))
     } else {
-        unreachable!()
+        tokio::spawn(server::server(None, shutdown_rx, state.clone()))
     };
 
-    info!("Shutting down: {}", shutdown_reason);
+    let (shutdown_reason, exit_code) = tokio::select! {
+        _ = shutdown_signal() => {
+            let _ = shutdown_tx.send(());
+            ("Received shutdown signal.", 0)
+        }
+        result = &mut server_handle => {
+            match result {
+                Ok(Ok(())) => ("Server completed.", 0),
+                // Server returned an error.
+                Ok(Err(error)) => {
+                    error!("Server task failed: {error}");
+                    ("Server task failed.", 1)
+                }
+                // Server panicked.
+                Err(error) => {
+                    error!("Server task panicked: {error}");
+                    ("Server task panicked.", 1)
+                }
+            }
+        }
+    };
+
+    if !server_handle.is_finished() {
+        let _ = server_handle.await;
+    }
+
+    info!("Shutting down: {shutdown_reason}");
 
     info!("Saving log.");
     drop(log_guard);
@@ -144,11 +120,15 @@ async fn main() -> Result<()> {
 
     println!("Goodbye!");
 
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+
     Ok(())
 }
 
-// Waits for either SIGINT or SIGTERM (Unix) or Ctrl-C (Windows).
-pub(crate) async fn shutdown_signal() {
+// Waits for either SIGINT or SIGTERM (UNIX) or Ctrl-C (Windows).
+async fn shutdown_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};

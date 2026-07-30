@@ -1,7 +1,7 @@
 use crate::ServerState;
 use crate::chat::{find_room_by_id, is_room_member};
+use crate::common::StandardResponse;
 use crate::common::error::ErrorResponse;
-use crate::common::success::SuccessResponse;
 use crate::middleware::authenticate::AuthenticatedUser;
 use axum::Extension;
 use axum::extract::{Path, Query, State};
@@ -25,7 +25,7 @@ pub async fn get_messages(
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(room_id): Path<Uuid>,
     Query(params): Query<GetMessagesQuery>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     find_room_by_id(&state.pool, room_id).await?;
 
     if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
@@ -114,7 +114,7 @@ pub async fn get_messages(
         None
     };
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Messages retrieved successfully.".to_string(),
         json!({

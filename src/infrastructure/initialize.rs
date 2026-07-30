@@ -59,10 +59,12 @@ pub async fn initialize(
     let migrator = sqlx::migrate::Migrator::new(migrations_path)
         .await
         .context("Failed to load migrations.")?;
+
     migrator
         .run(&pool)
         .await
         .context("Failed to run migrations.")?;
+
     info!("Database initialized.");
 
     CryptoProvider::install_default(&DEFAULT_PROVIDER)
@@ -71,8 +73,6 @@ pub async fn initialize(
     let jwt_secret = environment
         .require_variable("JWT_SECRET", "default-jwt-secret-key")
         .context("Failed to load JWT secret.")?;
-
-    info!("Initialization completed.");
 
     let login_rate_limiter = Arc::new(SlidingWindowRateLimiter::new(
         configuration.rate_limit.login_max_requests,
@@ -92,6 +92,8 @@ pub async fn initialize(
         login_rate_limiter,
         register_rate_limiter,
     };
+
+    info!("Initialization completed.");
 
     Ok((state, guard))
 }
