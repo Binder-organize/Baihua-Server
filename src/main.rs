@@ -20,6 +20,7 @@ use middleware::rate_limit::SlidingWindowRateLimiter;
 use sqlx::PgPool;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{error, info};
 use websocket::connection::ConnectionManager;
 
@@ -38,6 +39,7 @@ pub struct ServerState {
     pub connection_manager: Arc<ConnectionManager>,
     pub(crate) login_rate_limiter: Arc<SlidingWindowRateLimiter>,
     pub(crate) register_rate_limiter: Arc<SlidingWindowRateLimiter>,
+    pub(crate) shutting_down: Arc<AtomicBool>,
 }
 
 #[tokio::main]
@@ -88,6 +90,7 @@ async fn main() -> Result<()> {
 
     let (shutdown_reason, exit_code) = tokio::select! {
         _ = shutdown_signal() => {
+            state.shutting_down.store(true, Ordering::SeqCst);
             let _ = shutdown_tx.send(());
             ("Received shutdown signal.", 0)
         }

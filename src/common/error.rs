@@ -32,6 +32,18 @@ pub enum ErrorResponse {
     #[error("Too many requests: {0}")]
     TooManyRequests(String),
 
+    #[error("Request timed out: {0}")]
+    RequestTimeout(String),
+
+    #[error("Method not allowed: {0}")]
+    MethodNotAllowed(String),
+
+    #[error("Request body too large: {0}")]
+    PayloadTooLarge(String),
+
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
+
     #[error("Not found: {0}")]
     NotFound(String),
 }
@@ -45,6 +57,10 @@ impl ErrorResponse {
             ErrorResponse::Authentication(_) => StatusCode::UNAUTHORIZED,
             ErrorResponse::Forbidden(_) => StatusCode::FORBIDDEN,
             ErrorResponse::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
+            ErrorResponse::RequestTimeout(_) => StatusCode::REQUEST_TIMEOUT,
+            ErrorResponse::MethodNotAllowed(_) => StatusCode::METHOD_NOT_ALLOWED,
+            ErrorResponse::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+            ErrorResponse::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             ErrorResponse::NotFound(_) => StatusCode::NOT_FOUND,
             ErrorResponse::Database(_) | ErrorResponse::InternalError(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -62,6 +78,10 @@ impl ErrorResponse {
             ErrorResponse::BadRequest(_) => "BAD_REQUEST_ERROR",
             ErrorResponse::Database(_) => "DATABASE_ERROR",
             ErrorResponse::TooManyRequests(_) => "RATE_LIMIT_ERROR",
+            ErrorResponse::RequestTimeout(_) => "REQUEST_TIMEOUT_ERROR",
+            ErrorResponse::MethodNotAllowed(_) => "METHOD_NOT_ALLOWED_ERROR",
+            ErrorResponse::PayloadTooLarge(_) => "PAYLOAD_TOO_LARGE_ERROR",
+            ErrorResponse::ServiceUnavailable(_) => "SERVICE_UNAVAILABLE_ERROR",
             ErrorResponse::NotFound(_) => "NOT_FOUND_ERROR",
         }
     }
@@ -116,6 +136,7 @@ impl IntoResponse for ErrorResponse {
     }
 }
 /*
+// Maybe is useless.
 // Error type is converted to Response.
 impl From<ErrorResponse> for Response {
     fn from(error: ErrorResponse) -> Self {

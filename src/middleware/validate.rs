@@ -30,7 +30,7 @@ async fn validate_json_body(
     let body_bytes = axum::body::to_bytes(body, max_body_size)
         .await
         .map_err(|_| {
-            ErrorResponse::BadRequest(format!(
+            ErrorResponse::PayloadTooLarge(format!(
                 "Request body too large (max {} bytes).",
                 max_body_size
             ))

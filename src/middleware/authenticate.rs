@@ -34,13 +34,13 @@ pub async fn authenticate(
     let claims = validate_token(token, &state.jwt_secret)?;
 
     let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
-        error!("JWT sub claim is not a valid UUID: {}", claims.sub);
-        ErrorResponse::Authentication("Invalid token.".to_string())
+        error!("JWT sub claim is not a valid UUID: '{}'.", claims.sub);
+        ErrorResponse::Authentication("Invalid JsonWebToken.".to_string())
     })?;
 
     let user = find_user_by_id(user_id, &state.pool).await?;
     match user {
-        Some(u) if u.is_active => {}
+        Some(user) if user.is_active => {}
         _ => {
             return Err(ErrorResponse::Authentication(
                 "User not found or inactive.".to_string(),

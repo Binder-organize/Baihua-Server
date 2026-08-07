@@ -1,12 +1,12 @@
 use crate::ServerState;
 use crate::common::StandardResponse;
 use crate::common::error::ErrorResponse;
+use crate::common::extractor::JsonBody;
 use crate::middleware::authenticate::AuthenticatedUser;
 use crate::user::find_user_by_username;
 use axum::Extension;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::{Json, extract::rejection::JsonRejection};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
@@ -28,10 +28,8 @@ pub async fn add_members(
     State(state): State<Arc<ServerState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(room_id): Path<Uuid>,
-    body: Result<Json<AddMembersRequest>, JsonRejection>,
+    JsonBody(request): JsonBody<AddMembersRequest>,
 ) -> Result<StandardResponse, ErrorResponse> {
-    let Json(request) = body.map_err(|error| ErrorResponse::Json(error.to_string()))?;
-
     if request.usernames.is_empty() {
         return Err(ErrorResponse::BadRequest(
             "usernames list cannot be empty.".to_string(),

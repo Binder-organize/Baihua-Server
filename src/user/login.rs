@@ -2,9 +2,10 @@ use crate::ServerState;
 use crate::authenticate::jsonwebtoken::generate_token;
 use crate::common::StandardResponse;
 use crate::common::error::ErrorResponse;
+use crate::common::extractor::JsonBody;
 use crate::user::{UserLogin, find_user_with_password};
-use axum::extract::rejection::JsonRejection;
-use axum::{Json, extract::State, http::StatusCode};
+use axum::extract::State;
+use axum::http::StatusCode;
 use bcrypt::verify;
 use serde_json::json;
 use std::sync::Arc;
@@ -12,10 +13,8 @@ use tracing::{error, info};
 
 pub async fn login(
     State(state): State<Arc<ServerState>>,
-    user: Result<Json<UserLogin>, JsonRejection>,
+    JsonBody(user_login): JsonBody<UserLogin>,
 ) -> Result<StandardResponse, ErrorResponse> {
-    let Json(user_login) = user.map_err(|error| ErrorResponse::Json(error.to_string()))?;
-
     let Some((user, password_hash)) =
         find_user_with_password(&user_login.username, &state.pool).await?
     else {

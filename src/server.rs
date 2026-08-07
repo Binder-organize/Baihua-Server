@@ -5,6 +5,7 @@ use crate::health::health_check;
 use crate::middleware;
 use crate::websocket;
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::get;
 use std::sync::Arc;
 use tracing::info;
@@ -31,6 +32,20 @@ pub async fn server(
         .layer(axum::middleware::from_fn(middleware::tracing::tracing))
         .layer(axum::middleware::from_fn(middleware::error::panic))
         .layer(axum::middleware::from_fn(middleware::error::not_found))
+        .layer(axum::middleware::from_fn(
+            middleware::error::method_not_allowed,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::error::payload_too_large,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::error::service_unavailable,
+        ))
+        .layer(DefaultBodyLimit::max(
+            state.configuration.web.max_body_size as usize,
+        ))
         .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&address).await?;
@@ -75,5 +90,9 @@ pub async fn server(
 fn api_v1(state: Arc<ServerState>) -> Router<Arc<ServerState>> {
     Router::new()
         .nest("/user", crate::user::router(state.clone()))
-        .nest("/chat", crate::chat::router(state))
+        .nest("/chat", crate::chat::router(state.clone()))
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            middleware::error::request_timeout,
+        ))
 }

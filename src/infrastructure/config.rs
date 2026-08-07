@@ -20,6 +20,8 @@ pub struct WebConfiguration {
     pub port: u16,
     #[serde(default = "default_max_body_size")]
     pub max_body_size: u32,
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
 }
 
 // Log configuration
@@ -107,6 +109,9 @@ impl Default for WebSocketConfiguration {
 fn default_max_body_size() -> u32 {
     10 * 1024 * 1024 // 10 MB
 }
+fn default_request_timeout_secs() -> u64 {
+    30
+}
 fn default_log_level() -> String {
     "info".to_string()
 }
@@ -163,6 +168,7 @@ impl Default for ServerConfiguration {
                 host: "127.0.0.1".to_string(),
                 port: 2424,
                 max_body_size: default_max_body_size(),
+                request_timeout_secs: default_request_timeout_secs(),
             },
             logs: LogsConfiguration {
                 level: default_log_level(),
@@ -207,6 +213,11 @@ port = 2424
 # Requests exceeding this size are rejected with a 400 Bad Request.
 # Set a lower value in production to reduce exposure to large payloads.
 max_body_size = 10485760
+
+# The maximum time (in seconds) an HTTP request may take before it is
+# aborted with a 408 Request Timeout. When omitted, defaults to 30.
+# Applies to /api/v1 requests only; WebSocket connections are exempt.
+request_timeout_secs = 30
 
 # ---- Logging ----
 
@@ -327,6 +338,9 @@ token_revalidate_interval_secs = 600
         }
         if self.web.max_body_size == 0 {
             bail!("The maximum request body size cannot be 0.");
+        }
+        if self.web.request_timeout_secs == 0 {
+            bail!("The request timeout cannot be 0.");
         }
 
         if self.database.max_connections < self.database.min_connections {

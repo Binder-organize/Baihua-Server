@@ -91,6 +91,7 @@ pub async fn initialize(
         connection_manager: Arc::new(ConnectionManager::new()),
         login_rate_limiter,
         register_rate_limiter,
+        shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     info!("Initialization completed.");
