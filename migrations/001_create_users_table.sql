@@ -8,3 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     is_active BOOLEAN NOT NULL DEFAULT true
 );
+
+-- User list queries filter on is_active = true and sort by created_at DESC
+-- (src/user/list.rs). A partial index matches that exact access pattern.
+CREATE INDEX IF NOT EXISTS idx_users_created_at
+    ON users (created_at DESC) WHERE is_active = true;
