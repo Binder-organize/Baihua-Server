@@ -7,13 +7,7 @@ use std::sync::Arc;
 pub async fn health_check(
     State(state): State<Arc<ServerState>>,
 ) -> Result<StandardResponse, ErrorResponse> {
-    sqlx::query("SELECT 1")
-        .execute(&state.pool)
-        .await
-        .map_err(|error| {
-            tracing::error!("Health check failed: {}", error);
-            ErrorResponse::InternalError("Database connection failed.".to_string())
-        })?;
+    sqlx::query("SELECT 1").execute(&state.pool).await?;
 
     Ok(StandardResponse::success(
         StatusCode::OK,

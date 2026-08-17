@@ -13,7 +13,6 @@ use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 use std::sync::Arc;
-use tracing::error;
 use uuid::Uuid;
 
 // Rows are read with sqlx::Row::get like the rest of the chat module.
@@ -82,11 +81,7 @@ async fn expire_stale_requests(
     )
     .bind(expiry_hours as i32)
     .execute(pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to expire stale room requests: {}", error);
-        ErrorResponse::InternalError("Failed to expire stale room requests.".to_string())
-    })?;
+    .await?;
     Ok(())
 }
 
@@ -107,11 +102,7 @@ pub async fn create_room_request(
     let receiver = sqlx::query("SELECT id FROM users WHERE id = $1 AND is_active = true")
         .bind(payload.receiver_id)
         .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to check room request receiver: {}", error);
-            ErrorResponse::InternalError("Failed to check room request receiver.".to_string())
-        })?;
+        .await?;
 
     if receiver.is_none() {
         return Err(ErrorResponse::BadRequest(
@@ -130,11 +121,7 @@ pub async fn create_room_request(
     )
     .bind(auth_user.user_id)
     .fetch_one(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to count sent room requests: {}", error);
-        ErrorResponse::InternalError("Failed to count sent room requests.".to_string())
-    })?;
+    .await?;
 
     if sent_today >= cfg.send_daily_limit as i64 {
         return Err(ErrorResponse::TooManyRequests(
@@ -148,11 +135,7 @@ pub async fn create_room_request(
     )
     .bind(payload.receiver_id)
     .fetch_one(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to count pending room requests: {}", error);
-        ErrorResponse::InternalError("Failed to count pending room requests.".to_string())
-    })?;
+    .await?;
 
     if pending_count >= cfg.pending_max as i64 {
         return Err(ErrorResponse::Conflict(
@@ -168,11 +151,7 @@ pub async fn create_room_request(
     .bind(auth_user.user_id)
     .bind(payload.receiver_id)
     .fetch_optional(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to check pending room request: {}", error);
-        ErrorResponse::InternalError("Failed to check pending room request.".to_string())
-    })?;
+    .await?;
 
     if duplicate.is_some() {
         return Err(ErrorResponse::Conflict(
@@ -196,11 +175,7 @@ pub async fn create_room_request(
     .bind(payload.is_encrypted)
     .bind(now)
     .execute(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to create room request: {}", error);
-        ErrorResponse::InternalError("Failed to create room request.".to_string())
-    })?;
+    .await?;
 
     Ok(StandardResponse::success(
         StatusCode::CREATED,
@@ -228,11 +203,7 @@ pub async fn list_pending_requests(
     )
     .bind(auth_user.user_id)
     .fetch_one(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to count pending room requests: {}", error);
-        ErrorResponse::InternalError("Failed to count pending room requests.".to_string())
-    })?;
+    .await?;
 
     let rows = sqlx::query(
         "SELECT r.id, r.message, r.is_encrypted, r.created_at, \
@@ -247,11 +218,7 @@ pub async fn list_pending_requests(
     .bind(limit as i64)
     .bind(offset as i64)
     .fetch_all(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to list pending room requests: {}", error);
-        ErrorResponse::InternalError("Failed to list pending room requests.".to_string())
-    })?;
+    .await?;
 
     let requests: Vec<serde_json::Value> = rows
         .iter()
@@ -294,11 +261,7 @@ pub async fn list_sent_requests(
         sqlx::query_scalar("SELECT count(*)::bigint FROM room_requests WHERE sender_id = $1")
             .bind(auth_user.user_id)
             .fetch_one(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to count sent room requests: {}", error);
-                ErrorResponse::InternalError("Failed to count sent room requests.".to_string())
-            })?;
+            .await?;
 
     let rows = sqlx::query(
         "SELECT r.id, r.message, r.is_encrypted, r.created_at, r.status, \
@@ -313,11 +276,7 @@ pub async fn list_sent_requests(
     .bind(limit as i64)
     .bind(offset as i64)
     .fetch_all(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to list sent room requests: {}", error);
-        ErrorResponse::InternalError("Failed to list sent room requests.".to_string())
-    })?;
+    .await?;
 
     let requests: Vec<serde_json::Value> = rows
         .iter()
@@ -356,10 +315,7 @@ pub async fn accept_room_request(
 ) -> Result<StandardResponse, ErrorResponse> {
     // Lock the request row so concurrent accepts serialize: the loser re-reads
     // status='accepted' and reuses the room created by the winner.
-    let mut tx = state.pool.begin().await.map_err(|error| {
-        error!("Failed to begin transaction: {}", error);
-        ErrorResponse::InternalError("Failed to begin transaction.".to_string())
-    })?;
+    let mut tx = state.pool.begin().await?;
 
     let row = sqlx::query(
         "SELECT id, sender_id, receiver_id, message, status, is_encrypted, created_at, responded_at \
@@ -367,11 +323,7 @@ pub async fn accept_room_request(
     )
     .bind(request_id)
     .fetch_optional(&mut *tx)
-    .await
-    .map_err(|error| {
-        error!("Failed to fetch room request: {}", error);
-        ErrorResponse::InternalError("Failed to fetch room request.".to_string())
-    })?
+    .await?
     .ok_or(ErrorResponse::NotFound(
         "Room request not found.".to_string(),
     ))?;
@@ -400,11 +352,7 @@ pub async fn accept_room_request(
     let sender_username: String = sqlx::query_scalar("SELECT username FROM users WHERE id = $1")
         .bind(sender_id)
         .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to look up room request sender: {}", error);
-            ErrorResponse::InternalError("Failed to look up room request sender.".to_string())
-        })?
+        .await?
         .ok_or(ErrorResponse::InternalError(
             "Sender user no longer exists.".to_string(),
         ))?;
@@ -427,16 +375,9 @@ pub async fn accept_room_request(
     )
     .bind(request_id)
     .execute(&mut *tx)
-    .await
-    .map_err(|error| {
-        error!("Failed to accept room request: {}", error);
-        ErrorResponse::InternalError("Failed to accept room request.".to_string())
-    })?;
+    .await?;
 
-    tx.commit().await.map_err(|error| {
-        error!("Failed to commit transaction: {}", error);
-        ErrorResponse::InternalError("Failed to commit transaction.".to_string())
-    })?;
+    tx.commit().await?;
 
     let room_payload = room_response.body.data.ok_or(ErrorResponse::InternalError(
         "Failed to retrieve the created room.".to_string(),
@@ -460,10 +401,7 @@ pub async fn decline_room_request(
 ) -> Result<StandardResponse, ErrorResponse> {
     // Lock the request row so a concurrent accept cannot race the decline:
     // whoever wins sets the terminal status and the other sees it.
-    let mut tx = state.pool.begin().await.map_err(|error| {
-        error!("Failed to begin transaction: {}", error);
-        ErrorResponse::InternalError("Failed to begin transaction.".to_string())
-    })?;
+    let mut tx = state.pool.begin().await?;
 
     let row = sqlx::query(
         "SELECT id, sender_id, receiver_id, message, status, is_encrypted, created_at, responded_at \
@@ -471,11 +409,7 @@ pub async fn decline_room_request(
     )
     .bind(request_id)
     .fetch_optional(&mut *tx)
-    .await
-    .map_err(|error| {
-        error!("Failed to fetch room request: {}", error);
-        ErrorResponse::InternalError("Failed to fetch room request.".to_string())
-    })?
+    .await?
     .ok_or(ErrorResponse::NotFound(
         "Room request not found.".to_string(),
     ))?;
@@ -500,16 +434,9 @@ pub async fn decline_room_request(
     )
     .bind(request_id)
     .execute(&mut *tx)
-    .await
-    .map_err(|error| {
-        error!("Failed to decline room request: {}", error);
-        ErrorResponse::InternalError("Failed to decline room request.".to_string())
-    })?;
+    .await?;
 
-    tx.commit().await.map_err(|error| {
-        error!("Failed to commit transaction: {}", error);
-        ErrorResponse::InternalError("Failed to commit transaction.".to_string())
-    })?;
+    tx.commit().await?;
 
     Ok(StandardResponse::success(
         StatusCode::OK,
@@ -530,10 +457,7 @@ pub async fn cancel_room_request(
 ) -> Result<StandardResponse, ErrorResponse> {
     // Lock the request row so a concurrent accept/decline cannot win after
     // the cancel reads the row.
-    let mut tx = state.pool.begin().await.map_err(|error| {
-        error!("Failed to begin transaction: {}", error);
-        ErrorResponse::InternalError("Failed to begin transaction.".to_string())
-    })?;
+    let mut tx = state.pool.begin().await?;
 
     let row = sqlx::query(
         "SELECT id, sender_id, receiver_id, message, status, is_encrypted, created_at, responded_at \
@@ -541,11 +465,7 @@ pub async fn cancel_room_request(
     )
     .bind(request_id)
     .fetch_optional(&mut *tx)
-    .await
-    .map_err(|error| {
-        error!("Failed to fetch room request: {}", error);
-        ErrorResponse::InternalError("Failed to fetch room request.".to_string())
-    })?
+    .await?
     .ok_or(ErrorResponse::NotFound(
         "Room request not found.".to_string(),
     ))?;
@@ -570,16 +490,9 @@ pub async fn cancel_room_request(
     )
     .bind(request_id)
     .execute(&mut *tx)
-    .await
-    .map_err(|error| {
-        error!("Failed to cancel room request: {}", error);
-        ErrorResponse::InternalError("Failed to cancel room request.".to_string())
-    })?;
+    .await?;
 
-    tx.commit().await.map_err(|error| {
-        error!("Failed to commit transaction: {}", error);
-        ErrorResponse::InternalError("Failed to commit transaction.".to_string())
-    })?;
+    tx.commit().await?;
 
     Ok(StandardResponse::success(
         StatusCode::OK,

@@ -12,7 +12,6 @@ use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 use std::sync::Arc;
-use tracing::error;
 use uuid::Uuid;
 
 use crate::chat::ROLE_MEMBER;
@@ -55,9 +54,13 @@ pub async fn add_members(
     let now = Utc::now();
 
     for username in &request.usernames {
-        let user = find_user_by_username(username, &state.pool).await?.ok_or(
-            ErrorResponse::BadRequest(format!("User not found: {}", username)),
-        )?;
+        let user =
+            find_user_by_username(username, &state.pool)
+                .await?
+                .ok_or(ErrorResponse::NotFound(format!(
+                    "User not found: {}",
+                    username
+                )))?;
 
         // Check if already a member.
         let already_member =
@@ -65,11 +68,7 @@ pub async fn add_members(
                 .bind(room_id)
                 .bind(user.id)
                 .fetch_optional(&state.pool)
-                .await
-                .map_err(|error| {
-                    error!("Failed to check membership: {}", error);
-                    ErrorResponse::InternalError("Failed to check membership.".to_string())
-                })?;
+                .await?;
 
         if already_member.is_some() {
             continue; // Skip users who are already members.
@@ -83,11 +82,7 @@ pub async fn add_members(
         .bind(now)
         .bind(ROLE_MEMBER)
         .execute(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to add member: {}", error);
-            ErrorResponse::InternalError("Failed to add member.".to_string())
-        })?;
+        .await?;
 
         added.push(json!({
             "user_id": user.id,
@@ -128,11 +123,7 @@ pub async fn list_members(
     )
     .bind(room_id)
     .fetch_all(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to list members: {}", error);
-        ErrorResponse::InternalError("Failed to list members.".to_string())
-    })?;
+    .await?;
 
     let members: Vec<serde_json::Value> = member_rows
         .iter()
@@ -177,12 +168,8 @@ pub async fn remove_member(
     let room_info = sqlx::query("SELECT is_group FROM rooms WHERE id = $1")
         .bind(room_id)
         .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to get room info: {}", error);
-            ErrorResponse::InternalError("Failed to get room info.".to_string())
-        })?
-        .ok_or(ErrorResponse::BadRequest("Room not found.".to_string()))?;
+        .await?
+        .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
 
     let is_group: bool = room_info.get("is_group");
 
@@ -216,11 +203,7 @@ async fn handle_leave(
         sqlx::query("DELETE FROM rooms WHERE id = $1")
             .bind(room_id)
             .execute(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to delete room: {}", error);
-                ErrorResponse::InternalError("Failed to delete room.".to_string())
-            })?;
+            .await?;
 
         state
             .connection_manager
@@ -247,11 +230,7 @@ async fn handle_leave(
         .bind(room_id)
         .bind(user_id)
         .execute(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to remove member: {}", error);
-            ErrorResponse::InternalError("Failed to remove member.".to_string())
-        })?;
+        .await?;
 
     state
         .connection_manager
@@ -305,11 +284,7 @@ async fn handle_kick(
         .bind(room_id)
         .bind(target_user_id)
         .execute(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to remove member: {}", error);
-            ErrorResponse::InternalError("Failed to remove member.".to_string())
-        })?;
+        .await?;
 
     state
         .connection_manager

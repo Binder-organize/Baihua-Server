@@ -10,7 +10,7 @@ use axum::Router;
 use axum::routing::{get, post};
 use sqlx::PgPool;
 use std::sync::Arc;
-use tracing::{error, warn};
+use tracing::warn;
 use uuid::Uuid;
 
 pub const ROLE_ADMIN: &str = "admin";
@@ -56,11 +56,7 @@ pub async fn is_room_member(
         .bind(room_id)
         .bind(user_id)
         .fetch_optional(pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to check room membership: {}", error);
-            ErrorResponse::InternalError("Failed to check room membership.".to_string())
-        })?;
+        .await?;
 
     Ok(row.is_some())
 }
@@ -70,11 +66,7 @@ pub async fn find_room_by_id(pool: &PgPool, room_id: Uuid) -> Result<Uuid, Error
     let row = sqlx::query("SELECT 1 FROM rooms WHERE id = $1")
         .bind(room_id)
         .fetch_optional(pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to look up room: {}", error);
-            ErrorResponse::InternalError("Failed to look up room.".to_string())
-        })?;
+        .await?;
 
     row.map(|_| room_id)
         .ok_or_else(|| ErrorResponse::NotFound("Room not found.".to_string()))
@@ -92,11 +84,7 @@ pub async fn is_room_admin(
             .bind(user_id)
             .bind(ROLE_ADMIN)
             .fetch_optional(pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to check room admin: {}", error);
-                ErrorResponse::InternalError("Failed to check room admin.".to_string())
-            })?;
+            .await?;
 
     Ok(row.is_some())
 }
@@ -106,11 +94,7 @@ pub async fn get_member_count(pool: &PgPool, room_id: Uuid) -> Result<i64, Error
     let row = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM room_members WHERE room_id = $1")
         .bind(room_id)
         .fetch_one(pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to count room members: {}", error);
-            ErrorResponse::InternalError("Failed to count room members.".to_string())
-        })?;
+        .await?;
 
     Ok(row)
 }
@@ -131,11 +115,7 @@ pub async fn auto_promote_admin(
     let creator_id = sqlx::query_scalar::<_, Uuid>("SELECT created_by FROM rooms WHERE id = $1")
         .bind(room_id)
         .fetch_optional(pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to look up room creator: {}", error);
-            ErrorResponse::InternalError("Failed to look up room creator.".to_string())
-        })?;
+        .await?;
 
     // Priority 1: promote the room creator if eligible.
     if let Some(creator) = creator_id
@@ -146,11 +126,7 @@ pub async fn auto_promote_admin(
                 .bind(room_id)
                 .bind(creator)
                 .fetch_optional(pool)
-                .await
-                .map_err(|error| {
-                    error!("Failed to check creator membership: {}", error);
-                    ErrorResponse::InternalError("Failed to check creator membership.".to_string())
-                })?;
+                .await?;
 
         if is_member.is_some() {
             sqlx::query("UPDATE room_members SET role = $1 WHERE room_id = $2 AND user_id = $3")
@@ -158,11 +134,7 @@ pub async fn auto_promote_admin(
                 .bind(room_id)
                 .bind(creator)
                 .execute(pool)
-                .await
-                .map_err(|error| {
-                    error!("Failed to promote creator to admin: {}", error);
-                    ErrorResponse::InternalError("Failed to promote creator to admin.".to_string())
-                })?;
+                .await?;
 
             return Ok(());
         }
@@ -177,11 +149,7 @@ pub async fn auto_promote_admin(
     .bind(room_id)
     .bind(excluding_user_id)
     .fetch_optional(pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to find successor admin: {}", error);
-        ErrorResponse::InternalError("Failed to find successor admin.".to_string())
-    })?;
+    .await?;
 
     if let Some(user_id) = successor {
         sqlx::query("UPDATE room_members SET role = $1 WHERE room_id = $2 AND user_id = $3")
@@ -189,11 +157,7 @@ pub async fn auto_promote_admin(
             .bind(room_id)
             .bind(user_id)
             .execute(pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to promote successor to admin: {}", error);
-                ErrorResponse::InternalError("Failed to promote successor to admin.".to_string())
-            })?;
+            .await?;
     } else {
         warn!(
             "No eligible successor to promote in room {} after excluding user {}",

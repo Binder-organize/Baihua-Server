@@ -464,11 +464,7 @@ async fn handle_incoming(
             .bind(&content)
             .bind(now)
             .execute(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to insert message: {}", error);
-                ErrorResponse::InternalError("Failed to send message.".to_string())
-            })?;
+            .await?;
 
             let ws_message = json!({
                 "type": WS_NEW_MESSAGE,
@@ -570,14 +566,12 @@ async fn handle_incoming(
 
 // Query all room IDs the user is a member of.
 async fn get_user_room_ids(pool: &sqlx::PgPool, user_id: Uuid) -> Result<Vec<Uuid>, ErrorResponse> {
-    sqlx::query_scalar::<_, Uuid>("SELECT room_id FROM room_members WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to query user rooms: {}", error);
-            ErrorResponse::Database("Failed to query user rooms.".to_string())
-        })
+    Ok(
+        sqlx::query_scalar::<_, Uuid>("SELECT room_id FROM room_members WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(pool)
+            .await?,
+    )
 }
 
 fn parse_uuid_field(data: &serde_json::Value, field: &str) -> Result<Uuid, ErrorResponse> {

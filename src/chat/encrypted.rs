@@ -26,11 +26,7 @@ pub async fn encrypted_rooms_for_user(
     )
     .bind(user_id)
     .fetch_all(pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to query encrypted rooms: {}", error);
-        ErrorResponse::InternalError("Failed to query encrypted rooms.".to_string())
-    })?;
+    .await?;
 
     Ok(rows)
 }
@@ -50,11 +46,7 @@ pub(crate) async fn handle_encrypt_request(
     let room = sqlx::query("SELECT is_group, is_encrypted, created_by FROM rooms WHERE id = $1")
         .bind(room_id)
         .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to look up room: {}", error);
-            ErrorResponse::InternalError("Failed to look up room.".to_string())
-        })?
+        .await?
         .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
 
     if room.get("is_group") {
@@ -84,11 +76,7 @@ pub(crate) async fn handle_encrypt_request(
     .bind(room_id)
     .bind(user.id)
     .fetch_optional(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to find room partner: {}", error);
-        ErrorResponse::InternalError("Failed to find room partner.".to_string())
-    })?
+    .await?
     .ok_or(ErrorResponse::InternalError(
         "Room has no other member.".to_string(),
     ))?;
@@ -104,11 +92,7 @@ pub(crate) async fn handle_encrypt_request(
     sqlx::query("UPDATE rooms SET is_encrypted = true WHERE id = $1")
         .bind(room_id)
         .execute(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to update room encryption status: {}", error);
-            ErrorResponse::InternalError("Failed to set room encryption status.".to_string())
-        })?;
+        .await?;
 
     // Mark room as pending (awaiting encrypt_accept).
     state.connection_manager.mark_pending(room_id);
@@ -144,11 +128,7 @@ pub(crate) async fn handle_encrypt_accept(
     let is_encrypted: bool = sqlx::query_scalar("SELECT is_encrypted FROM rooms WHERE id = $1")
         .bind(room_id)
         .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to look up room: {}", error);
-            ErrorResponse::InternalError("Failed to look up room.".to_string())
-        })? // if_let when I want the bool
+        .await? // if_let when I want the bool
         .unwrap_or(false);
 
     if !is_encrypted {
@@ -208,11 +188,7 @@ pub(crate) async fn handle_encrypt_ready(
     let is_encrypted: bool = sqlx::query_scalar("SELECT is_encrypted FROM rooms WHERE id = $1")
         .bind(room_id)
         .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to look up room: {}", error);
-            ErrorResponse::InternalError("Failed to look up room.".to_string())
-        })?
+        .await?
         .unwrap_or(false);
 
     if !is_encrypted {
@@ -240,11 +216,7 @@ pub(crate) async fn handle_encrypt_ready(
     )
     .bind(room_id)
     .fetch_all(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to query room members: {}", error);
-        ErrorResponse::InternalError("Failed to query room members.".to_string())
-    })?;
+    .await?;
 
     let member_index =
         members
@@ -325,11 +297,7 @@ pub(crate) async fn handle_encrypt_message(
     .bind(&encrypted_bytes)
     .bind(now)
     .execute(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to insert encrypted message: {}", error);
-        ErrorResponse::InternalError("Failed to send encrypted message.".to_string())
-    })?;
+    .await?;
 
     // Broadcast ciphertext to the room (relay only).
     let ws_msg = json!({
@@ -392,8 +360,11 @@ pub(crate) async fn start_grace_periods_for_user(
 ) {
     let encrypted_rooms = match encrypted_rooms_for_user(pool, user_id).await {
         Ok(ids) => ids,
-        Err(e) => {
-            error!("Failed to get encrypted rooms for user {}: {}", user_id, e);
+        Err(error) => {
+            error!(
+                "Failed to get encrypted rooms for user {}: {}",
+                user_id, error
+            );
             return;
         }
     };
@@ -458,23 +429,23 @@ pub(crate) async fn cleanup_encrypted_room(
     pool: &PgPool,
 ) {
     // Delete all messages (both encrypted and plaintext — room is being reset).
-    if let Err(e) = sqlx::query("DELETE FROM messages WHERE room_id = $1")
+    if let Err(error) = sqlx::query("DELETE FROM messages WHERE room_id = $1")
         .bind(room_id)
         .execute(pool)
         .await
     {
-        error!("Failed to delete messages for room {}: {}", room_id, e);
+        error!("Failed to delete messages for room {}: {}", room_id, error);
     }
 
     // Reset room encryption status.
-    if let Err(e) = sqlx::query("UPDATE rooms SET is_encrypted = false WHERE id = $1")
+    if let Err(error) = sqlx::query("UPDATE rooms SET is_encrypted = false WHERE id = $1")
         .bind(room_id)
         .execute(pool)
         .await
     {
         error!(
             "Failed to reset room encryption status for {}: {}",
-            room_id, e
+            room_id, error
         );
     }
 
@@ -518,10 +489,10 @@ pub(crate) async fn check_expired_session_on_connect(
 ) {
     let encrypted_rooms = match encrypted_rooms_for_user(pool, user_id).await {
         Ok(ids) => ids,
-        Err(e) => {
+        Err(error) => {
             error!(
                 "Failed to query encrypted rooms for user {}: {}",
-                user_id, e
+                user_id, error
             );
             return;
         }

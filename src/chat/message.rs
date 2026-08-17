@@ -11,7 +11,6 @@ use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 use std::sync::Arc;
-use tracing::error;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -37,11 +36,7 @@ pub async fn get_messages(
     let is_encrypted: bool = sqlx::query_scalar("SELECT is_encrypted FROM rooms WHERE id = $1")
         .bind(room_id)
         .fetch_one(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to check encrypted flag: {}", error);
-            ErrorResponse::InternalError("Failed to check encrypted flag.".to_string())
-        })?;
+        .await?;
 
     let limit = params.limit.unwrap_or(50).min(100);
 
@@ -81,11 +76,7 @@ pub async fn get_messages(
             .bind(limit + 1)
             .fetch_all(&state.pool)
             .await
-    }
-    .map_err(|error| {
-        error!("Failed to get messages: {}", error);
-        ErrorResponse::InternalError("Failed to get messages.".to_string())
-    })?;
+    }?;
 
     let has_more = rows.len() > limit as usize;
     let visible = rows.iter().take(limit as usize);

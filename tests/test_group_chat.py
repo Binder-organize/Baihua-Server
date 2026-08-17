@@ -496,7 +496,7 @@ class TestGroupChat:
     def test_g13_target_user_not_found(
         self, session: requests.Session, base_url: str
     ) -> None:
-        """G13 – Creating a group with non-existent username → 400."""
+        """G13 – Creating a group with non-existent username → 404."""
         resp = session.post(
             f"{base_url}/api/v1/chat/rooms",
             json={
@@ -506,8 +506,8 @@ class TestGroupChat:
             },
             headers=self._auth(TestGroupChat.token_admin),
         )
-        assert resp.status_code == 400, resp.text
-        assert resp.json()["code"] == "BAD_REQUEST_ERROR"
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["code"] == "NOT_FOUND_ERROR"
 
     # ── G14 ───────────────────────────────────────────────────────────
 

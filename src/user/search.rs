@@ -9,7 +9,6 @@ use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 use std::sync::Arc;
-use tracing::error;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -51,11 +50,7 @@ pub async fn search_users(
             .bind(limit as i64)
             .bind(offset as i64)
             .fetch_all(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to search users by username: {}", error);
-                ErrorResponse::InternalError("Failed to search users.".to_string())
-            })?;
+            .await?;
 
             let count: i64 = sqlx::query_scalar(
                 "SELECT count(*)::bigint FROM users \
@@ -63,11 +58,7 @@ pub async fn search_users(
             )
             .bind(username)
             .fetch_one(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to count users during search: {}", error);
-                ErrorResponse::InternalError("Failed to search users.".to_string())
-            })?;
+            .await?;
 
             (rows, count)
         }
@@ -81,22 +72,15 @@ pub async fn search_users(
             .bind(limit as i64)
             .bind(offset as i64)
             .fetch_all(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to search users by user id: {}", error);
-                ErrorResponse::InternalError("Failed to search users.".to_string())
-            })?;
+            .await?;
 
             let count: i64 = sqlx::query_scalar(
-                "SELECT count(*)::bigint FROM users WHERE is_active = true AND id = $1",
+                "SELECT count(*)::bigint FROM users \
+                 WHERE is_active = true AND id = $1",
             )
             .bind(user_id)
             .fetch_one(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to count users during search: {}", error);
-                ErrorResponse::InternalError("Failed to search users.".to_string())
-            })?;
+            .await?;
 
             (rows, count)
         }

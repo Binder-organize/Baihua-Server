@@ -111,11 +111,7 @@ pub async fn new_user(
         .bind(&new_user.username)
         .bind(&new_user.email)
         .fetch_optional(pool)
-        .await
-        .map_err(|error| {
-            error!("Database query failed during user lookup: {}", error);
-            ErrorResponse::InternalError("Failed to check user existence.".to_string())
-        })?;
+        .await?;
 
     if existing_user.is_some() {
         return Err(ErrorResponse::Validation(
@@ -143,11 +139,7 @@ pub async fn new_user(
     .bind(created_at)
     .bind(true)
     .execute(pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to insert user into database: {}", error);
-            ErrorResponse::InternalError("Failed to create user.".to_string())
-        })?;
+        .await?;
 
     info!(
         "New user: {} is created, UUID is: {}.",
@@ -176,11 +168,7 @@ pub async fn find_user_by_id(
     )
     .bind(id)
     .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        error!("Database query failed during user lookup: {}", e);
-        ErrorResponse::InternalError("Failed to query user.".to_string())
-    })?;
+    .await?;
 
     match row {
         Some(row) => Ok(Some(User {
@@ -207,11 +195,7 @@ pub async fn find_user_by_username(
     )
     .bind(username)
     .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        error!("Database query failed during user lookup: {}", e);
-        ErrorResponse::InternalError("Failed to query user.".to_string())
-    })?;
+    .await?;
 
     match row {
         Some(row) => Ok(Some(User {
@@ -237,11 +221,7 @@ pub async fn find_user_with_password(
     )
     .bind(username)
     .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        error!("Database query failed during user lookup: {}", e);
-        ErrorResponse::InternalError("Failed to query user.".to_string())
-    })?;
+    .await?;
 
     match row {
         Some(row) => {

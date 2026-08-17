@@ -14,7 +14,6 @@ use sqlx::Row;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tracing::error;
 use uuid::Uuid;
 
 use crate::chat::{ROLE_ADMIN, ROLE_MEMBER};
@@ -53,9 +52,12 @@ pub async fn create_or_get_room(
             "Target username is required for private chat.".to_string(),
         ))?;
 
-        let target_user = find_user_by_username(username, &state.pool).await?.ok_or(
-            ErrorResponse::BadRequest("Target user not found.".to_string()),
-        )?;
+        let target_user =
+            find_user_by_username(username, &state.pool)
+                .await?
+                .ok_or(ErrorResponse::NotFound(
+                    "Target user not found.".to_string(),
+                ))?;
 
         if target_user.id == auth_user.user_id {
             return Err(ErrorResponse::BadRequest(
@@ -82,11 +84,7 @@ pub async fn create_or_get_room(
             .bind(target_user.id)
             .bind(request.is_encrypted)
             .fetch_one(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to check accepted room requests: {}", error);
-                ErrorResponse::InternalError("Failed to check accepted room requests.".to_string())
-            })?;
+            .await?;
 
             if accepted_count == 0 {
                 return Err(ErrorResponse::Forbidden(
@@ -141,9 +139,13 @@ async fn create_group_room(
     member_ids.push(auth_user.user_id);
 
     for username in unique_usernames {
-        let user = find_user_by_username(username, &state.pool).await?.ok_or(
-            ErrorResponse::BadRequest(format!("User not found: {}", username)),
-        )?;
+        let user =
+            find_user_by_username(username, &state.pool)
+                .await?
+                .ok_or(ErrorResponse::NotFound(format!(
+                    "User not found: {}",
+                    username
+                )))?;
 
         if user.id == auth_user.user_id {
             return Err(ErrorResponse::BadRequest(
@@ -155,10 +157,7 @@ async fn create_group_room(
     }
 
     // Use a transaction for atomic room + members creation.
-    let mut tx = state.pool.begin().await.map_err(|error| {
-        error!("Failed to begin transaction: {}", error);
-        ErrorResponse::InternalError("Failed to begin transaction.".to_string())
-    })?;
+    let mut tx = state.pool.begin().await?;
 
     let room_id = Uuid::now_v7();
     let now = Utc::now();
@@ -172,11 +171,7 @@ async fn create_group_room(
     .bind(now)
     .bind(true)
     .execute(&mut *tx)
-    .await
-    .map_err(|error| {
-        error!("Failed to create group room: {}", error);
-        ErrorResponse::InternalError("Failed to create group room.".to_string())
-    })?;
+    .await?;
 
     // Insert all members. Creator is admin, others are member.
     for (i, &user_id) in member_ids.iter().enumerate() {
@@ -189,17 +184,10 @@ async fn create_group_room(
         .bind(now)
         .bind(role)
         .execute(&mut *tx)
-        .await
-        .map_err(|error| {
-            error!("Failed to add member to group room: {}", error);
-            ErrorResponse::InternalError("Failed to add room member.".to_string())
-        })?;
+        .await?;
     }
 
-    tx.commit().await.map_err(|error| {
-        error!("Failed to commit transaction: {}", error);
-        ErrorResponse::InternalError("Failed to commit transaction.".to_string())
-    })?;
+    tx.commit().await?;
 
     Ok(StandardResponse::success(
         StatusCode::CREATED,
@@ -237,11 +225,7 @@ where
     .bind(user_b)
     .bind(is_encrypted)
     .fetch_optional(executor)
-    .await
-    .map_err(|error| {
-        error!("Failed to check existing room: {}", error);
-        ErrorResponse::InternalError("Failed to check existing room.".to_string())
-    })?;
+    .await?;
 
     Ok(row.map(|row| row.get::<Uuid, _>("id")))
 }
@@ -282,21 +266,14 @@ pub(crate) async fn create_private_room(
         (target_user.id, auth_user.user_id)
     };
 
-    let mut tx = state.pool.begin().await.map_err(|error| {
-        error!("Failed to begin transaction: {}", error);
-        ErrorResponse::InternalError("Failed to begin transaction.".to_string())
-    })?;
+    let mut tx = state.pool.begin().await?;
 
     // Block other creators of the same pair until this transaction ends.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1 || $2, 0))")
         .bind(lock_user_a.to_string())
         .bind(lock_user_b.to_string())
         .execute(&mut *tx)
-        .await
-        .map_err(|error| {
-            error!("Failed to acquire room creation lock: {}", error);
-            ErrorResponse::InternalError("Failed to acquire room creation lock.".to_string())
-        })?;
+        .await?;
 
     // Check if a private room already exists between these two users.
     // Encrypted and non-encrypted rooms are distinct; we match based on request.is_encrypted.
@@ -314,18 +291,11 @@ pub(crate) async fn create_private_room(
         )
         .bind(room_id)
         .fetch_optional(&mut *tx)
-        .await
-        .map_err(|error| {
-            error!("Failed to load existing room: {}", error);
-            ErrorResponse::InternalError("Failed to load existing room.".to_string())
-        })?
+        .await?
         .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
 
         let members = vec![auth_user.user_id, target_user.id];
-        tx.rollback().await.map_err(|error| {
-            error!("Failed to roll back transaction: {}", error);
-            ErrorResponse::InternalError("Failed to roll back transaction.".to_string())
-        })?;
+        tx.rollback().await?;
         return Ok(StandardResponse::success(
             StatusCode::OK,
             "Room already exists.".to_string(),
@@ -354,11 +324,7 @@ pub(crate) async fn create_private_room(
     .bind(false)
     .bind(request.is_encrypted)
     .execute(&mut *tx)
-    .await
-    .map_err(|error| {
-        error!("Failed to create room: {}", error);
-        ErrorResponse::InternalError("Failed to create room.".to_string())
-    })?;
+    .await?;
 
     // Add both users as members.
     let member_ids = vec![auth_user.user_id, target_user.id];
@@ -368,17 +334,10 @@ pub(crate) async fn create_private_room(
             .bind(user_id)
             .bind(now)
             .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                error!("Failed to add member to room: {}", error);
-                ErrorResponse::InternalError("Failed to add room member.".to_string())
-            })?;
+            .await?;
     }
 
-    tx.commit().await.map_err(|error| {
-        error!("Failed to commit transaction: {}", error);
-        ErrorResponse::InternalError("Failed to commit transaction.".to_string())
-    })?;
+    tx.commit().await?;
 
     Ok(StandardResponse::success(
         StatusCode::CREATED,
@@ -414,11 +373,7 @@ pub async fn get_room_detail(
     )
     .bind(room_id)
     .fetch_optional(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to get room: {}", error);
-        ErrorResponse::InternalError("Failed to get room.".to_string())
-    })?
+    .await?
     .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
 
     // Get members with user info.
@@ -431,11 +386,7 @@ pub async fn get_room_detail(
     )
     .bind(room_id)
     .fetch_all(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to get room members: {}", error);
-        ErrorResponse::InternalError("Failed to get room members.".to_string())
-    })?;
+    .await?;
 
     let members: Vec<serde_json::Value> = member_rows
         .iter()
@@ -497,11 +448,7 @@ pub async fn list_rooms(
     )
     .bind(auth_user.user_id)
     .fetch_all(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to list rooms: {}", error);
-        ErrorResponse::InternalError("Failed to list rooms.".to_string())
-    })?;
+    .await?;
 
     // Collect room IDs for the member UUID query.
     let room_ids: Vec<Uuid> = room_rows.iter().map(|r| r.get("id")).collect();
@@ -513,11 +460,7 @@ pub async fn list_rooms(
         sqlx::query("SELECT room_id, user_id FROM room_members WHERE room_id = ANY($1)")
             .bind(&room_ids)
             .fetch_all(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to get room members: {}", error);
-                ErrorResponse::InternalError("Failed to get room members.".to_string())
-            })?
+            .await?
     };
 
     // Group member UUIDs by room_id.

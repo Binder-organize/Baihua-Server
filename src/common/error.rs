@@ -4,7 +4,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 #[derive(Error, Debug)]
 pub enum ErrorResponse {
@@ -139,12 +139,12 @@ impl IntoResponse for ErrorResponse {
         (response.status, Json(response.body)).into_response()
     }
 }
-/*
-// Maybe is useless.
-// Error type is converted to Response.
-impl From<ErrorResponse> for Response {
-    fn from(error: ErrorResponse) -> Self {
-        error.into_response()
+
+// sqlx failures convert via `?` so handlers skip per-call map_err blocks.
+// Every variant, including RowNotFound, surfaces as a Database error.
+impl From<sqlx::Error> for ErrorResponse {
+    fn from(error: sqlx::Error) -> Self {
+        error!("Database error: {}", error);
+        ErrorResponse::Database(error.to_string())
     }
 }
-*/
