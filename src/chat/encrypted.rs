@@ -72,7 +72,7 @@ pub(crate) async fn handle_encrypt_request(
 
     // Check room is not already in an active encrypted session.
     if state.connection_manager.is_session_active(room_id) {
-        return Err(ErrorResponse::BadRequest(
+        return Err(ErrorResponse::Conflict(
             "Room already has an active encrypted session.".to_string(),
         ));
     }
@@ -95,7 +95,7 @@ pub(crate) async fn handle_encrypt_request(
 
     // Check partner is online.
     if !state.connection_manager.is_user_online(partner_id) {
-        return Err(ErrorResponse::BadRequest(
+        return Err(ErrorResponse::Conflict(
             "Both users must be online to start an encrypted session.".to_string(),
         ));
     }
@@ -145,14 +145,14 @@ pub(crate) async fn handle_encrypt_accept(
         .bind(room_id)
         .fetch_optional(&state.pool)
         .await
-        .map_err(|e| {
-            error!("Failed to look up room: {}", e);
+        .map_err(|error| {
+            error!("Failed to look up room: {}", error);
             ErrorResponse::InternalError("Failed to look up room.".to_string())
         })? // if_let when I want the bool
         .unwrap_or(false);
 
     if !is_encrypted {
-        return Err(ErrorResponse::BadRequest(
+        return Err(ErrorResponse::Conflict(
             "Room is not marked for encrypted chat.".to_string(),
         ));
     }
@@ -166,14 +166,14 @@ pub(crate) async fn handle_encrypt_accept(
 
     // Check session is not already active.
     if state.connection_manager.is_session_active(room_id) {
-        return Err(ErrorResponse::BadRequest(
+        return Err(ErrorResponse::Conflict(
             "Session is already active.".to_string(),
         ));
     }
 
     // Check there is a pending encrypt_request for this room.
     if !state.connection_manager.is_pending(room_id) {
-        return Err(ErrorResponse::BadRequest(
+        return Err(ErrorResponse::Conflict(
             "No pending encrypt request for this room.".to_string(),
         ));
     }
@@ -209,14 +209,14 @@ pub(crate) async fn handle_encrypt_ready(
         .bind(room_id)
         .fetch_optional(&state.pool)
         .await
-        .map_err(|e| {
-            error!("Failed to look up room: {}", e);
+        .map_err(|error| {
+            error!("Failed to look up room: {}", error);
             ErrorResponse::InternalError("Failed to look up room.".to_string())
         })?
         .unwrap_or(false);
 
     if !is_encrypted {
-        return Err(ErrorResponse::BadRequest(
+        return Err(ErrorResponse::Conflict(
             "Room is not marked for encrypted chat.".to_string(),
         ));
     }
@@ -228,7 +228,7 @@ pub(crate) async fn handle_encrypt_ready(
     }
 
     if state.connection_manager.is_session_active(room_id) {
-        return Err(ErrorResponse::BadRequest(
+        return Err(ErrorResponse::Conflict(
             "Session is already active.".to_string(),
         ));
     }
@@ -241,8 +241,8 @@ pub(crate) async fn handle_encrypt_ready(
     .bind(room_id)
     .fetch_all(&state.pool)
     .await
-    .map_err(|e| {
-        error!("Failed to query room members: {}", e);
+    .map_err(|error| {
+        error!("Failed to query room members: {}", error);
         ErrorResponse::InternalError("Failed to query room members.".to_string())
     })?;
 
@@ -281,7 +281,7 @@ pub(crate) async fn handle_encrypt_message(
 ) -> Result<Option<String>, ErrorResponse> {
     // Must be in an active encrypted session.
     if !state.connection_manager.is_session_active(room_id) {
-        return Err(ErrorResponse::BadRequest(
+        return Err(ErrorResponse::Conflict(
             "No active encrypted session in this room.".to_string(),
         ));
     }
@@ -308,9 +308,9 @@ pub(crate) async fn handle_encrypt_message(
 
     // Decode base64. The decoded content is binary; we validate it
     // decodes correctly but never inspect the plaintext.
-    let encrypted_bytes = BASE64
-        .decode(ciphertext.as_bytes())
-        .map_err(|e| ErrorResponse::Validation(format!("Invalid base64 ciphertext: {}", e)))?;
+    let encrypted_bytes = BASE64.decode(ciphertext.as_bytes()).map_err(|error| {
+        ErrorResponse::Validation(format!("Invalid base64 ciphertext: {}", error))
+    })?;
 
     let message_id = Uuid::now_v7();
     let now = Utc::now();
@@ -326,8 +326,8 @@ pub(crate) async fn handle_encrypt_message(
     .bind(now)
     .execute(&state.pool)
     .await
-    .map_err(|e| {
-        error!("Failed to insert encrypted message: {}", e);
+    .map_err(|error| {
+        error!("Failed to insert encrypted message: {}", error);
         ErrorResponse::InternalError("Failed to send encrypted message.".to_string())
     })?;
 
@@ -366,7 +366,7 @@ pub(crate) async fn handle_encrypt_leave(
     pool: &PgPool,
 ) -> Result<Option<String>, ErrorResponse> {
     if !state.connection_manager.is_session_active(room_id) {
-        return Err(ErrorResponse::BadRequest(
+        return Err(ErrorResponse::Conflict(
             "No active encrypted session in this room.".to_string(),
         ));
     }

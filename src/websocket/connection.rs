@@ -133,7 +133,6 @@ impl ConnectionManager {
     }
 
     // Check if a user has any active WebSocket connection.
-    #[allow(dead_code)]
     pub fn is_user_online(&self, user_id: Uuid) -> bool {
         self.user_connections
             .read()
