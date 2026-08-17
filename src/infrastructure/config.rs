@@ -11,6 +11,8 @@ pub struct ServerConfiguration {
     pub rate_limit: RateLimitConfiguration,
     #[serde(default)]
     pub websocket: WebSocketConfiguration,
+    #[serde(default)]
+    pub room_request: RoomRequestConfiguration,
 }
 
 // Web server configuration
@@ -105,6 +107,30 @@ impl Default for WebSocketConfiguration {
     }
 }
 
+// Room request configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoomRequestConfiguration {
+    #[serde(default = "default_room_request_message_max_bytes")]
+    pub message_max_bytes: u32,
+    #[serde(default = "default_room_request_expiry_hours")]
+    pub expiry_hours: u64,
+    #[serde(default = "default_room_request_pending_max")]
+    pub pending_max: u32,
+    #[serde(default = "default_room_request_send_daily_limit")]
+    pub send_daily_limit: u32,
+}
+
+impl Default for RoomRequestConfiguration {
+    fn default() -> Self {
+        Self {
+            message_max_bytes: default_room_request_message_max_bytes(),
+            expiry_hours: default_room_request_expiry_hours(),
+            pending_max: default_room_request_pending_max(),
+            send_daily_limit: default_room_request_send_daily_limit(),
+        }
+    }
+}
+
 // Default value functions
 fn default_max_body_size() -> u32 {
     10 * 1024 * 1024 // 10 MB
@@ -160,6 +186,18 @@ fn default_message_rate_window_secs() -> u64 {
 fn default_token_revalidate_interval_secs() -> u64 {
     600
 }
+fn default_room_request_message_max_bytes() -> u32 {
+    500
+}
+fn default_room_request_expiry_hours() -> u64 {
+    120 // 5 days
+}
+fn default_room_request_pending_max() -> u32 {
+    50 // per receiver inbox cap
+}
+fn default_room_request_send_daily_limit() -> u32 {
+    20 // per sender, 24h window
+}
 
 impl Default for ServerConfiguration {
     fn default() -> Self {
@@ -186,6 +224,7 @@ impl Default for ServerConfiguration {
             },
             rate_limit: RateLimitConfiguration::default(),
             websocket: WebSocketConfiguration::default(),
+            room_request: RoomRequestConfiguration::default(),
         }
     }
 }
@@ -328,6 +367,25 @@ message_rate_window_secs = 10
 # Interval (in seconds) between JWT token re-validation checks for an
 # active WebSocket connection. When omitted, defaults to 600 (10 min).
 token_revalidate_interval_secs = 600
+
+# ---- Room Requests ----
+
+[room_request]
+# Maximum length (in bytes) of the request message a user can send when
+# requesting a private room. When omitted, defaults to 500.
+message_max_bytes = 500
+
+# How long (in hours) a pending room request stays valid before it is
+# automatically marked as expired (5 days by default).
+expiry_hours = 120
+
+# Maximum number of pending room requests a single user can have in their
+# inbox at once. When omitted, defaults to 50.
+pending_max = 50
+
+# Maximum number of room requests a single user can send per day (24h
+# sliding window). When omitted, defaults to 20.
+send_daily_limit = 20
 "#
         .to_string()
     }
@@ -396,6 +454,19 @@ token_revalidate_interval_secs = 600
         }
         if self.websocket.token_revalidate_interval_secs == 0 {
             bail!("The WebSocket token revalidate interval cannot be 0.");
+        }
+
+        if self.room_request.message_max_bytes == 0 {
+            bail!("The room request message max bytes cannot be 0.");
+        }
+        if self.room_request.expiry_hours == 0 {
+            bail!("The room request expiry hours cannot be 0.");
+        }
+        if self.room_request.pending_max == 0 {
+            bail!("The room request pending max cannot be 0.");
+        }
+        if self.room_request.send_daily_limit == 0 {
+            bail!("The room request send daily limit cannot be 0.");
         }
 
         Ok(())

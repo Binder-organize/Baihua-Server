@@ -1,12 +1,13 @@
 pub(crate) mod encrypted;
 mod member;
 mod message;
+mod request;
 mod room;
 
 use crate::ServerState;
 use crate::common::error::ErrorResponse;
 use axum::Router;
-use axum::routing::get;
+use axum::routing::{get, post};
 use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{error, warn};
@@ -14,6 +15,36 @@ use uuid::Uuid;
 
 pub const ROLE_ADMIN: &str = "admin";
 pub const ROLE_MEMBER: &str = "member";
+
+// Sanitize user-provided text shared by WebSocket messages and room
+// requests: strip control characters (keep newlines), trim, then check
+// the length against the caller-provided limit.
+pub(crate) fn validate_message_content(
+    content: String,
+    max_bytes: usize,
+) -> Result<String, ErrorResponse> {
+    let sanitized: String = content
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .collect();
+
+    let trimmed = sanitized.trim().to_string();
+
+    if trimmed.is_empty() {
+        return Err(ErrorResponse::Validation(
+            "Message content cannot be empty.".to_string(),
+        ));
+    }
+
+    if trimmed.len() > max_bytes {
+        return Err(ErrorResponse::Validation(format!(
+            "Message content exceeds {} bytes.",
+            max_bytes
+        )));
+    }
+
+    Ok(trimmed)
+}
 
 // Check if a user is a member of a room.
 pub async fn is_room_member(
@@ -34,7 +65,7 @@ pub async fn is_room_member(
     Ok(row.is_some())
 }
 
-// Check that a room exists. Returns Ok(room_id) if it does, Err(NotFound) if it does not.
+// Check if a room exists.
 pub async fn find_room_by_id(pool: &PgPool, room_id: Uuid) -> Result<Uuid, ErrorResponse> {
     let row = sqlx::query("SELECT 1 FROM rooms WHERE id = $1")
         .bind(room_id)
@@ -178,6 +209,24 @@ pub fn router(state: Arc<ServerState>) -> Router<Arc<ServerState>> {
         .route(
             "/rooms",
             get(room::list_rooms).post(room::create_or_get_room),
+        )
+        .route("/rooms/requests", post(request::create_room_request))
+        .route(
+            "/rooms/requests/pending",
+            get(request::list_pending_requests),
+        )
+        .route("/rooms/requests/sent", get(request::list_sent_requests))
+        .route(
+            "/rooms/requests/{request_id}/accept",
+            post(request::accept_room_request),
+        )
+        .route(
+            "/rooms/requests/{request_id}/decline",
+            post(request::decline_room_request),
+        )
+        .route(
+            "/rooms/requests/{request_id}/cancel",
+            post(request::cancel_room_request),
         )
         .route("/rooms/{room_id}", get(room::get_room_detail))
         .route(

@@ -1,6 +1,6 @@
-mod list;
 mod login;
 mod register;
+mod search;
 
 use crate::common::error::ErrorResponse;
 use crate::{ServerState, middleware};
@@ -128,8 +128,9 @@ pub async fn new_user(
     let created_at = Utc::now();
 
     // Hash password.
-    let password_hashed = hash(new_user.password, DEFAULT_COST)
-        .map_err(|e| ErrorResponse::InternalError(format!("Hash password failed: {}.", e)))?;
+    let password_hashed = hash(new_user.password, DEFAULT_COST).map_err(|error| {
+        ErrorResponse::InternalError(format!("Hash password failed: {}.", error))
+    })?;
 
     // Insert user into database.
     sqlx::query(
@@ -143,13 +144,13 @@ pub async fn new_user(
     .bind(true)
     .execute(pool)
         .await
-        .map_err(|e| {
-            error!("Failed to insert user into database: {}", e);
+        .map_err(|error| {
+            error!("Failed to insert user into database: {}", error);
             ErrorResponse::InternalError("Failed to create user.".to_string())
         })?;
 
     info!(
-        "New user: {} is created, id is: {}.",
+        "New user: {} is created, UUID is: {}.",
         new_user.username, &uuid
     );
 
@@ -288,7 +289,7 @@ pub fn router(state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
         );
 
     let authenticated = axum::Router::new()
-        .route("/list", axum::routing::get(list::list_users))
+        .route("/search", axum::routing::get(search::search_users))
         .route_layer(axum::middleware::from_fn_with_state(
             state,
             crate::middleware::authenticate::authenticate,

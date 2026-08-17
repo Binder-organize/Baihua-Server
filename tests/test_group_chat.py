@@ -42,7 +42,7 @@ def _register_and_login(
     )
     assert login_resp.status_code == 200, login_resp.text
     body = login_resp.json()
-    assert body["error_code"] == "OK"
+    assert body["code"] == "SUCCESS"
     return body["data"]["token"], user
 
 
@@ -132,7 +132,7 @@ class TestGroupChat:
         assert resp.status_code == 201, resp.text
 
         body = resp.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         data = body["data"]
 
         # room id must be a valid UUID
@@ -173,7 +173,7 @@ class TestGroupChat:
             headers=self._auth(TestGroupChat.token_admin),
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["error_code"] == "BAD_REQUEST_ERROR"
+        assert resp.json()["code"] == "BAD_REQUEST_ERROR"
 
     # ── G3 ────────────────────────────────────────────────────────────
 
@@ -190,7 +190,7 @@ class TestGroupChat:
             headers=headers,
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["error_code"] == "BAD_REQUEST_ERROR"
+        assert resp.json()["code"] == "BAD_REQUEST_ERROR"
 
         # empty name
         resp = session.post(
@@ -199,7 +199,7 @@ class TestGroupChat:
             headers=headers,
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["error_code"] == "BAD_REQUEST_ERROR"
+        assert resp.json()["code"] == "BAD_REQUEST_ERROR"
 
         # empty usernames list
         resp = session.post(
@@ -208,7 +208,7 @@ class TestGroupChat:
             headers=headers,
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["error_code"] == "BAD_REQUEST_ERROR"
+        assert resp.json()["code"] == "BAD_REQUEST_ERROR"
 
         # missing usernames
         resp = session.post(
@@ -217,7 +217,7 @@ class TestGroupChat:
             headers=headers,
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["error_code"] == "BAD_REQUEST_ERROR"
+        assert resp.json()["code"] == "BAD_REQUEST_ERROR"
 
     # ── G4 ────────────────────────────────────────────────────────────
 
@@ -238,7 +238,7 @@ class TestGroupChat:
         assert resp.status_code == 200, resp.text
 
         body = resp.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         data = body["data"]
         assert data["added_count"] == 1
         assert data["added"][0]["username"] == TestGroupChat.user_d["username"]
@@ -266,7 +266,7 @@ class TestGroupChat:
             headers=self._auth(token_b),
         )
         assert resp.status_code == 403, resp.text
-        assert resp.json()["error_code"] == "FORBIDDEN_ERROR"
+        assert resp.json()["code"] == "FORBIDDEN_ERROR"
 
     # ── G6 ────────────────────────────────────────────────────────────
 
@@ -284,7 +284,7 @@ class TestGroupChat:
         assert resp.status_code == 200, resp.text
 
         body = resp.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         data = body["data"]
         assert data["count"] == 4  # A, B, C, D
         members = data["members"]
@@ -317,7 +317,7 @@ class TestGroupChat:
         assert resp.status_code == 200, resp.text
 
         body = resp.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         data = body["data"]
 
         assert data["id"] == TestGroupChat.room_id
@@ -360,7 +360,7 @@ class TestGroupChat:
         assert resp.status_code == 200, resp.text
 
         body = resp.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         data = body["data"]
         assert data["left_user_id"] == TestGroupChat.user_c["id"]
         assert data["room_deleted"] is False
@@ -389,7 +389,7 @@ class TestGroupChat:
         assert resp.status_code == 200, resp.text
 
         body = resp.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         data = body["data"]
         assert data["removed_user_id"] == TestGroupChat.user_d["id"]
 
@@ -420,7 +420,7 @@ class TestGroupChat:
             headers=self._auth(token_x),
         )
         assert resp.status_code == 403, resp.text
-        assert resp.json()["error_code"] == "FORBIDDEN_ERROR"
+        assert resp.json()["code"] == "FORBIDDEN_ERROR"
 
         # get room detail
         resp = session.get(
@@ -428,7 +428,7 @@ class TestGroupChat:
             headers=self._auth(token_x),
         )
         assert resp.status_code == 403, resp.text
-        assert resp.json()["error_code"] == "FORBIDDEN_ERROR"
+        assert resp.json()["code"] == "FORBIDDEN_ERROR"
 
         # list members
         resp = session.get(
@@ -436,7 +436,7 @@ class TestGroupChat:
             headers=self._auth(token_x),
         )
         assert resp.status_code == 403, resp.text
-        assert resp.json()["error_code"] == "FORBIDDEN_ERROR"
+        assert resp.json()["code"] == "FORBIDDEN_ERROR"
 
     # ── G11 ───────────────────────────────────────────────────────────
 
@@ -507,7 +507,7 @@ class TestGroupChat:
             headers=self._auth(TestGroupChat.token_admin),
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["error_code"] == "BAD_REQUEST_ERROR"
+        assert resp.json()["code"] == "BAD_REQUEST_ERROR"
 
     # ── G14 ───────────────────────────────────────────────────────────
 
@@ -528,7 +528,7 @@ class TestGroupChat:
             headers=self._auth(TestGroupChat.token_admin),
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["error_code"] == "BAD_REQUEST_ERROR"
+        assert resp.json()["code"] == "BAD_REQUEST_ERROR"
 
     # ── G15 ───────────────────────────────────────────────────────────
 

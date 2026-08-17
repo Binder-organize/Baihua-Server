@@ -7,5 +7,5 @@ class TestHealth:
         assert resp.status_code == 200
 
         body = resp.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         assert body["data"]["status"] == "ok"

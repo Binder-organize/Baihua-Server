@@ -441,7 +441,7 @@ async fn handle_incoming(
                     ErrorResponse::Validation("Missing 'content' in send_message data.".to_string())
                 })?;
 
-            let content = validate_message_content(content.to_string())?;
+            let content = crate::chat::validate_message_content(content.to_string(), 5000)?;
 
             find_room_by_id(&state.pool, room_id).await?;
 
@@ -578,29 +578,6 @@ async fn get_user_room_ids(pool: &sqlx::PgPool, user_id: Uuid) -> Result<Vec<Uui
             error!("Failed to query user rooms: {}", error);
             ErrorResponse::Database("Failed to query user rooms.".to_string())
         })
-}
-
-fn validate_message_content(content: String) -> Result<String, ErrorResponse> {
-    let sanitized: String = content
-        .chars()
-        .filter(|c| !c.is_control() || *c == '\n')
-        .collect();
-
-    let trimmed = sanitized.trim().to_string();
-
-    if trimmed.is_empty() {
-        return Err(ErrorResponse::Validation(
-            "Message content cannot be empty.".to_string(),
-        ));
-    }
-
-    if trimmed.len() > 5000 {
-        return Err(ErrorResponse::Validation(
-            "Message content exceeds 5000 bytes.".to_string(),
-        ));
-    }
-
-    Ok(trimmed)
 }
 
 fn parse_uuid_field(data: &serde_json::Value, field: &str) -> Result<Uuid, ErrorResponse> {

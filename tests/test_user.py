@@ -22,7 +22,7 @@ class TestRegister:
         assert resp.status_code == 400
 
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "username is required" in body["message"].lower()
 
     def test_missing_email(self, session: requests.Session, base_url: str):
@@ -34,7 +34,7 @@ class TestRegister:
         assert resp.status_code == 400
 
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "email is required" in body["message"].lower()
 
     def test_missing_password(self, session: requests.Session, base_url: str):
@@ -45,7 +45,7 @@ class TestRegister:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "password is required" in body["message"].lower()
 
     def test_register_success(self, session: requests.Session, base_url: str):
@@ -62,7 +62,7 @@ class TestRegister:
         assert resp.status_code == 201, resp.text
 
         body = resp.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         assert body["data"]["user"]["username"] == uname
         assert body["data"]["user"]["email"] == f"{uname}@example.com"
 
@@ -88,7 +88,7 @@ class TestRegister:
             },
         )
         assert resp.status_code == 400
-        assert resp.json()["error_code"] == "VALIDATION_ERROR"
+        assert resp.json()["code"] == "VALIDATION_ERROR"
 
     def test_empty_username_string(self, session: requests.Session, base_url: str):
         """Should reject register with empty username string."""
@@ -98,7 +98,7 @@ class TestRegister:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "username is required" in body["message"].lower()
 
     def test_empty_email_string(self, session: requests.Session, base_url: str):
@@ -109,7 +109,7 @@ class TestRegister:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "email is required" in body["message"].lower()
 
     def test_empty_password_string(self, session: requests.Session, base_url: str):
@@ -120,7 +120,7 @@ class TestRegister:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "password is required" in body["message"].lower()
 
 
@@ -134,7 +134,7 @@ class TestLogin:
         assert resp.status_code == 400
 
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "username is required" in body["message"].lower()
 
     def test_missing_password(self, session: requests.Session, base_url: str):
@@ -145,7 +145,7 @@ class TestLogin:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "password is required" in body["message"].lower()
 
     def test_login_without_email_succeeds_validation(self, session: requests.Session, base_url: str):
@@ -173,7 +173,7 @@ class TestLogin:
         resp = session.post(f"{base_url}/api/v1/user/login", json={})
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "username is required" in body["message"].lower()
 
     def test_empty_username_string(self, session: requests.Session, base_url: str):
@@ -184,7 +184,7 @@ class TestLogin:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "username is required" in body["message"].lower()
 
     def test_empty_password_string(self, session: requests.Session, base_url: str):
@@ -195,7 +195,7 @@ class TestLogin:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "password is required" in body["message"].lower()
 
     def test_login_wrong_credentials(self, session: requests.Session, base_url: str):
@@ -207,7 +207,7 @@ class TestLogin:
         assert resp.status_code == 401
 
         body = resp.json()
-        assert body["error_code"] == "AUTHENTICATION_ERROR"
+        assert body["code"] == "AUTHENTICATION_ERROR"
 
 class TestValidationMiddleware:
     """Tests for shared middleware behavior (validate_json_body)."""
@@ -221,7 +221,7 @@ class TestValidationMiddleware:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "content-type" in body["message"].lower()
 
     def test_register_invalid_json(self, session: requests.Session, base_url: str):
@@ -233,7 +233,7 @@ class TestValidationMiddleware:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "INVALID_JSON_ERROR"
+        assert body["code"] == "INVALID_JSON_ERROR"
 
     def test_login_wrong_content_type(self, session: requests.Session, base_url: str):
         """Login with wrong Content-Type should be rejected before handler."""
@@ -244,7 +244,7 @@ class TestValidationMiddleware:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "VALIDATION_ERROR"
+        assert body["code"] == "VALIDATION_ERROR"
         assert "content-type" in body["message"].lower()
 
     def test_login_invalid_json(self, session: requests.Session, base_url: str):
@@ -256,7 +256,7 @@ class TestValidationMiddleware:
         )
         assert resp.status_code == 400
         body = resp.json()
-        assert body["error_code"] == "INVALID_JSON_ERROR"
+        assert body["code"] == "INVALID_JSON_ERROR"
 
 
 class TestLoginFullFlow:
@@ -281,6 +281,6 @@ class TestLoginFullFlow:
         assert log.status_code == 200, log.text
 
         body = log.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         assert "token" in body["data"]
         assert body["data"]["user"]["username"] == uname

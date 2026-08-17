@@ -46,6 +46,9 @@ pub enum ErrorResponse {
 
     #[error("Not found: {0}")]
     NotFound(String),
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
 }
 
 impl ErrorResponse {
@@ -62,6 +65,7 @@ impl ErrorResponse {
             ErrorResponse::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
             ErrorResponse::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             ErrorResponse::NotFound(_) => StatusCode::NOT_FOUND,
+            ErrorResponse::Conflict(_) => StatusCode::CONFLICT,
             ErrorResponse::Database(_) | ErrorResponse::InternalError(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -83,6 +87,7 @@ impl ErrorResponse {
             ErrorResponse::PayloadTooLarge(_) => "PAYLOAD_TOO_LARGE_ERROR",
             ErrorResponse::ServiceUnavailable(_) => "SERVICE_UNAVAILABLE_ERROR",
             ErrorResponse::NotFound(_) => "NOT_FOUND_ERROR",
+            ErrorResponse::Conflict(_) => "CONFLICT_ERROR",
         }
     }
 
@@ -90,10 +95,9 @@ impl ErrorResponse {
     // In production, internal and database errors return a generic message
     // to avoid leaking implementation details.
     fn client_message(&self) -> String {
-        let is_production = Environment::from_environment().is_production();
         match self {
             ErrorResponse::InternalError(_) | ErrorResponse::Database(_) => {
-                if is_production {
+                if Environment::from_environment().is_production() {
                     "An internal error occurred. Please try again later.".to_string()
                 } else {
                     self.to_string()
@@ -119,12 +123,12 @@ impl IntoResponse for ErrorResponse {
         // Log error.
         if response.status.is_server_error() {
             warn!(
-                "Server returned an error: HTTP status code: 'INTERNAL_SERVER_ERROR', error code: '{}', message: '{}', ID: '{}'.",
+                "Server returned an error: HTTP status code: 'INTERNAL_SERVER_ERROR', code: '{}', message: '{}', ID: '{}'.",
                 response.body.code, response.body.message, response.body.response_id
             );
         } else {
             info!(
-                "Server returned an error: HTTP status code: '{}', error code: '{}', message: '{}', ID: '{}'.",
+                "Server returned an error: HTTP status code: '{}', code: '{}', message: '{}', ID: '{}'.",
                 response.status,
                 response.body.code,
                 response.body.message,

@@ -15,7 +15,7 @@ use uuid::Uuid;
 // Public helpers
 
 // Query all room IDs where is_encrypted=true and the user is a member.
-pub(crate) async fn encrypted_rooms_for_user(
+pub async fn encrypted_rooms_for_user(
     pool: &PgPool,
     user_id: Uuid,
 ) -> Result<Vec<Uuid>, ErrorResponse> {
@@ -27,10 +27,11 @@ pub(crate) async fn encrypted_rooms_for_user(
     .bind(user_id)
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        error!("Failed to query encrypted rooms: {}", e);
+    .map_err(|error| {
+        error!("Failed to query encrypted rooms: {}", error);
         ErrorResponse::InternalError("Failed to query encrypted rooms.".to_string())
     })?;
+
     Ok(rows)
 }
 
@@ -50,23 +51,15 @@ pub(crate) async fn handle_encrypt_request(
         .bind(room_id)
         .fetch_optional(&state.pool)
         .await
-        .map_err(|e| {
-            error!("Failed to look up room: {}", e);
+        .map_err(|error| {
+            error!("Failed to look up room: {}", error);
             ErrorResponse::InternalError("Failed to look up room.".to_string())
         })?
         .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
 
-    let is_group: bool = room.get("is_group");
-    if is_group {
+    if room.get("is_group") {
         return Err(ErrorResponse::BadRequest(
             "Encrypted chat is only supported in private rooms.".to_string(),
-        ));
-    }
-
-    // Check room is not already in an active encrypted session.
-    if state.connection_manager.is_session_active(room_id) {
-        return Err(ErrorResponse::BadRequest(
-            "Room already has an active encrypted session.".to_string(),
         ));
     }
 
@@ -74,6 +67,13 @@ pub(crate) async fn handle_encrypt_request(
     if !crate::chat::is_room_member(&state.pool, room_id, user.id).await? {
         return Err(ErrorResponse::Forbidden(
             "You are not a member of this room.".to_string(),
+        ));
+    }
+
+    // Check room is not already in an active encrypted session.
+    if state.connection_manager.is_session_active(room_id) {
+        return Err(ErrorResponse::BadRequest(
+            "Room already has an active encrypted session.".to_string(),
         ));
     }
 
@@ -85,8 +85,8 @@ pub(crate) async fn handle_encrypt_request(
     .bind(user.id)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|e| {
-        error!("Failed to find room partner: {}", e);
+    .map_err(|error| {
+        error!("Failed to find room partner: {}", error);
         ErrorResponse::InternalError("Failed to find room partner.".to_string())
     })?
     .ok_or(ErrorResponse::InternalError(
@@ -105,8 +105,8 @@ pub(crate) async fn handle_encrypt_request(
         .bind(room_id)
         .execute(&state.pool)
         .await
-        .map_err(|e| {
-            error!("Failed to update room encryption status: {}", e);
+        .map_err(|error| {
+            error!("Failed to update room encryption status: {}", error);
             ErrorResponse::InternalError("Failed to set room encryption status.".to_string())
         })?;
 

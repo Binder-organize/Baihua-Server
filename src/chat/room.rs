@@ -46,6 +46,55 @@ pub async fn create_or_get_room(
     if request.is_group {
         create_group_room(&state, &auth_user, &request).await
     } else {
+        // Private chat gating: a new private room may only be created when an
+        // accepted room request exists between the two users. Existing rooms
+        // (including rooms created before this feature) remain reachable.
+        let username = request.username.as_ref().ok_or(ErrorResponse::BadRequest(
+            "Target username is required for private chat.".to_string(),
+        ))?;
+
+        let target_user = find_user_by_username(username, &state.pool).await?.ok_or(
+            ErrorResponse::BadRequest("Target user not found.".to_string()),
+        )?;
+
+        if target_user.id == auth_user.user_id {
+            return Err(ErrorResponse::BadRequest(
+                "Cannot create a room with yourself.".to_string(),
+            ));
+        }
+
+        let existing_room = find_private_room(
+            &state.pool,
+            auth_user.user_id,
+            target_user.id,
+            request.is_encrypted,
+        )
+        .await?;
+
+        if existing_room.is_none() {
+            let accepted_count: i64 = sqlx::query_scalar::<_, i64>(
+                "SELECT count(*)::bigint FROM room_requests \
+                 WHERE status = 'accepted' AND is_encrypted = $3 \
+                   AND ((sender_id = $1 AND receiver_id = $2) \
+                     OR (sender_id = $2 AND receiver_id = $1))",
+            )
+            .bind(auth_user.user_id)
+            .bind(target_user.id)
+            .bind(request.is_encrypted)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|error| {
+                error!("Failed to check accepted room requests: {}", error);
+                ErrorResponse::InternalError("Failed to check accepted room requests.".to_string())
+            })?;
+
+            if accepted_count == 0 {
+                return Err(ErrorResponse::Forbidden(
+                    "A private room requires an accepted room request.".to_string(),
+                ));
+            }
+        }
+
         create_private_room(&state, &auth_user, &request).await
     }
 }
@@ -166,8 +215,42 @@ async fn create_group_room(
     ))
 }
 
+// Look up an existing private (non-group) room shared by two users under
+// the given encryption flag. Returns None when such a room does not exist.
+// The executor is generic so callers can run the check inside a transaction.
+async fn find_private_room<'c, E>(
+    executor: E,
+    user_a: Uuid,
+    user_b: Uuid,
+    is_encrypted: bool,
+) -> Result<Option<Uuid>, ErrorResponse>
+where
+    E: sqlx::PgExecutor<'c>,
+{
+    let row = sqlx::query(
+        "SELECT r.id FROM rooms r \
+         INNER JOIN room_members m1 ON r.id = m1.room_id AND m1.user_id = $1 \
+         INNER JOIN room_members m2 ON r.id = m2.room_id AND m2.user_id = $2 \
+         WHERE r.is_group = false AND r.is_encrypted = $3",
+    )
+    .bind(user_a)
+    .bind(user_b)
+    .bind(is_encrypted)
+    .fetch_optional(executor)
+    .await
+    .map_err(|error| {
+        error!("Failed to check existing room: {}", error);
+        ErrorResponse::InternalError("Failed to check existing room.".to_string())
+    })?;
+
+    Ok(row.map(|row| row.get::<Uuid, _>("id")))
+}
+
 // Create or find an existing private (2-person) room.
-async fn create_private_room(
+// The whole check-then-insert runs in one transaction guarded by an
+// advisory lock keyed on the unordered user pair, so concurrent creations
+// from either direction (two accepts, or direct POSTs) cannot double-create.
+pub(crate) async fn create_private_room(
     state: &Arc<ServerState>,
     auth_user: &AuthenticatedUser,
     request: &CreateRoomRequest,
@@ -191,28 +274,58 @@ async fn create_private_room(
         ));
     }
 
-    // Check if a private room already exists between these two users.
-    // Encrypted and non-encrypted rooms are distinct; we match based on request.is_encrypted.
-    let existing = sqlx::query(
-        "SELECT r.id, r.name, r.created_by, r.created_at, r.is_group, r.is_encrypted \
-         FROM rooms r \
-         INNER JOIN room_members m1 ON r.id = m1.room_id AND m1.user_id = $1 \
-         INNER JOIN room_members m2 ON r.id = m2.room_id AND m2.user_id = $2 \
-         WHERE r.is_group = false AND r.is_encrypted = $3",
-    )
-    .bind(auth_user.user_id)
-    .bind(target_user.id)
-    .bind(request.is_encrypted)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to check existing room: {}", error);
-        ErrorResponse::InternalError("Failed to check existing room.".to_string())
+    // The lock key must be direction-independent: (A,B) and (B,A) acquire
+    // the same key so both orders of a cross-direction accept serialize.
+    let (lock_user_a, lock_user_b) = if auth_user.user_id < target_user.id {
+        (auth_user.user_id, target_user.id)
+    } else {
+        (target_user.id, auth_user.user_id)
+    };
+
+    let mut tx = state.pool.begin().await.map_err(|error| {
+        error!("Failed to begin transaction: {}", error);
+        ErrorResponse::InternalError("Failed to begin transaction.".to_string())
     })?;
 
-    if let Some(row) = existing {
-        let room_id: Uuid = row.get("id");
+    // Block other creators of the same pair until this transaction ends.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1 || $2, 0))")
+        .bind(lock_user_a.to_string())
+        .bind(lock_user_b.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            error!("Failed to acquire room creation lock: {}", error);
+            ErrorResponse::InternalError("Failed to acquire room creation lock.".to_string())
+        })?;
+
+    // Check if a private room already exists between these two users.
+    // Encrypted and non-encrypted rooms are distinct; we match based on request.is_encrypted.
+    let existing_room = find_private_room(
+        &mut *tx,
+        auth_user.user_id,
+        target_user.id,
+        request.is_encrypted,
+    )
+    .await?;
+
+    if let Some(room_id) = existing_room {
+        let row = sqlx::query(
+            "SELECT id, name, created_by, created_at, is_group, is_encrypted FROM rooms WHERE id = $1",
+        )
+        .bind(room_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| {
+            error!("Failed to load existing room: {}", error);
+            ErrorResponse::InternalError("Failed to load existing room.".to_string())
+        })?
+        .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
+
         let members = vec![auth_user.user_id, target_user.id];
+        tx.rollback().await.map_err(|error| {
+            error!("Failed to roll back transaction: {}", error);
+            ErrorResponse::InternalError("Failed to roll back transaction.".to_string())
+        })?;
         return Ok(StandardResponse::success(
             StatusCode::OK,
             "Room already exists.".to_string(),
@@ -227,12 +340,6 @@ async fn create_private_room(
             }),
         ));
     }
-
-    // Create a new private room inside a transaction.
-    let mut tx = state.pool.begin().await.map_err(|error| {
-        error!("Failed to begin transaction: {}", error);
-        ErrorResponse::InternalError("Failed to begin transaction.".to_string())
-    })?;
 
     let room_id = Uuid::now_v7();
     let now = Utc::now();

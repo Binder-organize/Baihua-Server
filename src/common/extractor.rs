@@ -37,3 +37,5 @@ fn map_json_rejection(rejection: JsonRejection) -> ErrorResponse {
         other => ErrorResponse::Json(other.to_string()),
     }
 }
+
+// todo extract database errors
