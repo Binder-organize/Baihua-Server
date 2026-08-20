@@ -784,3 +784,95 @@ class ChatTest:
                 ws_b.close()
         finally:
             ws_a.close()
+
+
+# ── account deletion preserves chat history ─────────────────────────
+
+class TestDeletedAccountPreservesChat:
+    """Deleting a user must keep rooms and messages; the sender and
+    creator references become NULL so clients can render a deactivated
+    user instead of losing the conversation."""
+
+    @staticmethod
+    def _auth(token: str) -> dict:
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_rooms_and_messages_survive_account_deletion(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """A and B chat in a private room, A deletes the account.
+
+        B must still see the room and every message, with A's
+        references nulled out (sender_id / created_by)."""
+        token_a, user_a = _register_and_login(session, base_url, prefix="delchata")
+        token_b, user_b = _register_and_login(session, base_url, prefix="delchatb")
+
+        # A creates a group room containing A and B (no room request needed).
+        resp = session.post(
+            f"{base_url}/api/v1/chat/rooms",
+            json={
+                "is_group": True,
+                "name": "del-test-group",
+                "usernames": [user_b["username"]],
+            },
+            headers=self._auth(token_a),
+        )
+        assert resp.status_code == 201, resp.text
+        room_id = resp.json()["data"]["id"]
+
+        # A sends a message over WebSocket.
+        ws_base = base_url.replace("http", "ws")
+        ws_a = _ws_connect(ws_base, token_a)
+        try:
+            _recv(ws_a)  # consume "connected"
+            ws_a.send(
+                json.dumps({
+                    "type": "send_message",
+                    "data": {"room_id": room_id, "content": "bye from A"},
+                })
+            )
+            ack = _recv_until(ws_a, "message_sent")
+            assert ack["data"]["sender_id"] == user_a["id"]
+        finally:
+            ws_a.close()
+
+        # A deletes the account (password verified).
+        del_resp = session.delete(
+            f"{base_url}/api/v1/user/me",
+            json={"password": "P@ssw0rd!"},
+            headers=self._auth(token_a),
+        )
+        assert del_resp.status_code == 200, del_resp.text
+
+        # B still reads the room message history; A's sender_id is null.
+        msgs = session.get(
+            f"{base_url}/api/v1/chat/rooms/{room_id}/messages",
+            headers=self._auth(token_b),
+        )
+        assert msgs.status_code == 200, msgs.text
+        messages = msgs.json()["data"]["messages"]
+        assert len(messages) == 1, messages
+        assert messages[0]["content"] == "bye from A"
+        assert messages[0]["sender_id"] is None
+
+        # B still sees the room detail; A's creator reference is null.
+        detail = session.get(
+            f"{base_url}/api/v1/chat/rooms/{room_id}",
+            headers=self._auth(token_b),
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["data"]["id"] == room_id
+        assert detail.json()["data"]["created_by"] is None
+
+        # The room still appears in B's room list and the last-message
+        # preview survives with an empty sender username.
+        rooms = session.get(
+            f"{base_url}/api/v1/chat/rooms",
+            headers=self._auth(token_b),
+        )
+        assert rooms.status_code == 200, rooms.text
+        listed = [r for r in rooms.json()["data"]["rooms"] if r["id"] == room_id]
+        assert len(listed) == 1, rooms.text
+        assert listed[0]["last_message"]["content"] == "bye from A"
+        assert listed[0]["last_message"]["sender_username"] is None
+        assert listed[0]["created_by"] is None

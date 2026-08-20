@@ -89,6 +89,7 @@ pub async fn initialize(
         jwt_secret,
         environment,
         connection_manager: Arc::new(ConnectionManager::new()),
+        avatars_directory: app_directory.join("avatars"),
         login_rate_limiter,
         register_rate_limiter,
         shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -100,7 +101,7 @@ pub async fn initialize(
 }
 
 async fn ensure_app_directories(app_directory: &Path) -> Result<()> {
-    let directories = vec!["logs"];
+    let directories = vec!["logs", "avatars"];
 
     for directory_name in directories {
         let directory_path = app_directory.join(directory_name);

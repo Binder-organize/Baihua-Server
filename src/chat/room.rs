@@ -302,7 +302,7 @@ pub(crate) async fn create_private_room(
             json!({
                 "id": room_id,
                 "name": Option::<String>::None,
-                "created_by": row.get::<Uuid, _>("created_by"),
+            "created_by": row.get::<Option<Uuid>, _>("created_by"),
                 "created_at": row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
                 "is_group": row.get::<bool, _>("is_group"),
                 "is_encrypted": row.get::<bool, _>("is_encrypted"),
@@ -409,7 +409,7 @@ pub async fn get_room_detail(
         json!({
             "id": room_row.get::<Uuid, _>("id"),
             "name": room_row.get::<Option<String>, _>("name"),
-            "created_by": room_row.get::<Uuid, _>("created_by"),
+            "created_by": room_row.get::<Option<Uuid>, _>("created_by"),
             "created_at": room_row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
             "is_group": room_row.get::<bool, _>("is_group"),
             "is_encrypted": room_row.get::<bool, _>("is_encrypted"),
@@ -439,7 +439,7 @@ pub async fn list_rooms(
          LEFT JOIN LATERAL ( \
              SELECT m.id AS msg_id, m.content, m.created_at, u.username AS sender_username \
              FROM messages m \
-             INNER JOIN users u ON m.sender_id = u.id \
+             LEFT JOIN users u ON m.sender_id = u.id \
              WHERE m.room_id = r.id \
              ORDER BY m.created_at DESC, m.id DESC \
              LIMIT 1 \
@@ -485,7 +485,7 @@ pub async fn list_rooms(
                     json!({
                         "id": row.get::<Uuid, _>("last_msg_id"),
                         "content": content,
-                        "sender_username": row.get::<String, _>("last_msg_sender_username"),
+                        "sender_username": row.get::<Option<String>, _>("last_msg_sender_username"),
                         "created_at": row.get::<DateTime<Utc>, _>("last_msg_created_at").to_rfc3339(),
                     })
                 })
@@ -496,7 +496,7 @@ pub async fn list_rooms(
         rooms.push(json!({
             "id": room_id,
             "name": row.get::<Option<String>, _>("name"),
-            "created_by": row.get::<Uuid, _>("created_by"),
+            "created_by": row.get::<Option<Uuid>, _>("created_by"),
             "created_at": row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
             "is_group": row.get::<bool, _>("is_group"),
             "is_encrypted": is_encrypted,

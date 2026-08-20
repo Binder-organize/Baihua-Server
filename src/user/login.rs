@@ -36,6 +36,7 @@ pub async fn login(
         &state.jwt_secret,
         state.configuration.user.jsonwebtoken_expiration_hours,
         &user.id.to_string(),
+        user.token_version,
     )
     .await?;
 

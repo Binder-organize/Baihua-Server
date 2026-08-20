@@ -91,7 +91,7 @@ pub async fn get_messages(
             json!({
                 "id": row.get::<Uuid, _>("id"),
                 "room_id": row.get::<Uuid, _>("room_id"),
-                "sender_id": row.get::<Uuid, _>("sender_id"),
+                "sender_id": row.get::<Option<Uuid>, _>("sender_id"),
                 content_key: row.get::<Option<String>, _>("content"),
                 "created_at": row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
             })

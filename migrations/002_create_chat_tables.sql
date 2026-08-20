@@ -8,7 +8,7 @@
 CREATE TABLE IF NOT EXISTS rooms (
     id UUID PRIMARY KEY,
     name TEXT,
-    created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     is_group BOOLEAN NOT NULL DEFAULT false,
     is_encrypted BOOLEAN NOT NULL DEFAULT false
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS room_members (
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY,
     room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_id UUID REFERENCES users(id) ON DELETE SET NULL,
     content TEXT,
     encrypted_content BYTEA,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()

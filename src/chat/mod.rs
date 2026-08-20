@@ -111,14 +111,15 @@ pub async fn auto_promote_admin(
     room_id: Uuid,
     excluding_user_id: Uuid,
 ) -> Result<(), ErrorResponse> {
-    // Look up the room's creator.
-    let creator_id = sqlx::query_scalar::<_, Uuid>("SELECT created_by FROM rooms WHERE id = $1")
-        .bind(room_id)
-        .fetch_optional(pool)
-        .await?;
+    // Look up the room's creator (NULL once the creator deleted the account).
+    let creator_id =
+        sqlx::query_scalar::<_, Option<Uuid>>("SELECT created_by FROM rooms WHERE id = $1")
+            .bind(room_id)
+            .fetch_optional(pool)
+            .await?;
 
     // Priority 1: promote the room creator if eligible.
-    if let Some(creator) = creator_id
+    if let Some(Some(creator)) = creator_id
         && creator != excluding_user_id
     {
         let is_member =

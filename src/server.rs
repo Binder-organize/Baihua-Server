@@ -28,6 +28,10 @@ pub async fn server(
         .route("/greet", get(greet))
         .route("/health", get(health_check))
         .route("/websocket", get(websocket::handler::ws_handler))
+        .route(
+            "/static/avatars/{filename}",
+            axum::routing::get(crate::user::avatar::serve_avatar_file),
+        )
         .nest("/api/v1", api_v1(state.clone()))
         .layer(axum::middleware::from_fn(middleware::tracing::tracing))
         .layer(axum::middleware::from_fn(middleware::error::panic))

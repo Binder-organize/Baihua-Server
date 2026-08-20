@@ -1,4 +1,9 @@
+pub(crate) mod avatar;
+mod delete;
 mod login;
+mod logout;
+mod password;
+mod profile;
 mod register;
 mod search;
 
@@ -23,9 +28,15 @@ pub struct User {
     // Optional and repeatable user nickname.
     pub nickname: Option<String>,
     pub phone_number: Option<String>,
+    pub bio: Option<String>,
+    pub avatar: Option<String>,
     // UTC datetime (serialized as RFC 3339).
     pub created_at: DateTime<Utc>,
     pub is_active: bool,
+    // Monotonic counter bumped on logout and password change; used to
+    // invalidate previously issued JWTs. Never exposed to clients.
+    #[serde(skip_serializing)]
+    pub token_version: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -85,6 +96,14 @@ impl UserRegister {
         if self.username.len() <= 3 || self.username.len() >= 40 {
             return Err(ErrorResponse::Validation(
                 "Username must be between 4 and 40 characters long.".to_string(),
+            ));
+        }
+
+        // A username that parses as a UUID would make the /user/{user}
+        // lookup ambiguous, so reject it at registration time.
+        if Uuid::parse_str(&self.username).is_ok() {
+            return Err(ErrorResponse::Validation(
+                "Username cannot be in UUID format.".to_string(),
             ));
         }
 
@@ -152,8 +171,11 @@ pub async fn new_user(
         email: new_user.email,
         nickname: None,
         phone_number: None,
+        bio: None,
+        avatar: None,
         created_at,
         is_active: true,
+        token_version: 0,
     })
 }
 
@@ -163,7 +185,7 @@ pub async fn find_user_by_id(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<Option<User>, ErrorResponse> {
     let row = sqlx::query(
-        r#"SELECT id, username, email, nickname, phone_number, created_at, is_active
+        r#"SELECT id, username, email, nickname, phone_number, bio, avatar, created_at, is_active, token_version
            FROM users WHERE id = $1"#,
     )
     .bind(id)
@@ -177,8 +199,11 @@ pub async fn find_user_by_id(
             email: row.get("email"),
             nickname: row.get("nickname"),
             phone_number: row.get("phone_number"),
+            bio: row.get("bio"),
+            avatar: row.get("avatar"),
             created_at: row.get("created_at"),
             is_active: row.get("is_active"),
+            token_version: row.get("token_version"),
         })),
         None => Ok(None),
     }
@@ -190,7 +215,7 @@ pub async fn find_user_by_username(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<Option<User>, ErrorResponse> {
     let row = sqlx::query(
-        r#"SELECT id, username, email, nickname, phone_number, created_at, is_active
+        r#"SELECT id, username, email, nickname, phone_number, bio, avatar, created_at, is_active, token_version
            FROM users WHERE username = $1"#,
     )
     .bind(username)
@@ -204,8 +229,11 @@ pub async fn find_user_by_username(
             email: row.get("email"),
             nickname: row.get("nickname"),
             phone_number: row.get("phone_number"),
+            bio: row.get("bio"),
+            avatar: row.get("avatar"),
             created_at: row.get("created_at"),
             is_active: row.get("is_active"),
+            token_version: row.get("token_version"),
         })),
         None => Ok(None),
     }
@@ -216,7 +244,7 @@ pub async fn find_user_with_password(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<Option<(User, String)>, ErrorResponse> {
     let row = sqlx::query(
-        r#"SELECT id, username, email, password, nickname, phone_number, created_at, is_active
+        r#"SELECT id, username, email, password, nickname, phone_number, bio, avatar, created_at, is_active, token_version
            FROM users WHERE username = $1"#,
     )
     .bind(username)
@@ -232,8 +260,11 @@ pub async fn find_user_with_password(
                 email: row.get("email"),
                 nickname: row.get("nickname"),
                 phone_number: row.get("phone_number"),
+                bio: row.get("bio"),
+                avatar: row.get("avatar"),
                 created_at: row.get("created_at"),
                 is_active: row.get("is_active"),
+                token_version: row.get("token_version"),
             };
             Ok(Some((user, password)))
         }
@@ -270,6 +301,17 @@ pub fn router(state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
 
     let authenticated = axum::Router::new()
         .route("/search", axum::routing::get(search::search_users))
+        .route("/{user}", axum::routing::get(profile::get_public_profile))
+        .route(
+            "/me",
+            axum::routing::patch(profile::update_profile).delete(delete::delete_account),
+        )
+        .route("/me/logout", axum::routing::post(logout::logout))
+        .route(
+            "/me/password",
+            axum::routing::patch(password::change_password),
+        )
+        .route("/me/avatar", axum::routing::post(avatar::upload_avatar))
         .route_layer(axum::middleware::from_fn_with_state(
             state,
             crate::middleware::authenticate::authenticate,

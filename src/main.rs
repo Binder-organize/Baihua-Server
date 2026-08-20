@@ -37,6 +37,7 @@ pub struct ServerState {
     pub jwt_secret: String,
     pub environment: Environment,
     pub connection_manager: Arc<ConnectionManager>,
+    pub avatars_directory: PathBuf,
     pub(crate) login_rate_limiter: Arc<SlidingWindowRateLimiter>,
     pub(crate) register_rate_limiter: Arc<SlidingWindowRateLimiter>,
     pub(crate) shutting_down: Arc<AtomicBool>,

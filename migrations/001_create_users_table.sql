@@ -5,8 +5,11 @@ CREATE TABLE IF NOT EXISTS users (
     password TEXT NOT NULL,
     nickname TEXT,
     phone_number TEXT,
+    bio TEXT,
+    avatar TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    is_active BOOLEAN NOT NULL DEFAULT true
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    token_version BIGINT NOT NULL DEFAULT 0
 );
 
 -- User list queries filter on is_active = true and sort by created_at DESC

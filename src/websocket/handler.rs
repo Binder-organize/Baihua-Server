@@ -77,7 +77,17 @@ pub async fn ws_handler(
         ));
     }
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user, token)))
+    if claims.token_version != user.token_version {
+        return Err(ErrorResponse::Authentication(
+            "Session expired. Please reconnect.".to_string(),
+        ));
+    }
+
+    // Snapshot the version before the user is moved into the socket task;
+    // every later check compares live data against this frozen value.
+    let token_version = user.token_version;
+
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user, token, token_version)))
 }
 
 // Main WebSocket lifecycle handler.
@@ -86,6 +96,7 @@ async fn handle_socket(
     state: Arc<ServerState>,
     user: crate::user::User,
     token: String,
+    token_version: i64,
 ) {
     let manager = &state.connection_manager;
 
@@ -198,7 +209,7 @@ async fn handle_socket(
                         } else {
                             msg_timestamps.push_back(now);
                             match handle_incoming(
-                                &state, &user, &text,
+                                &state, &user, &text, token_version,
                             ).await {
                                 Ok(Some(response)) => {
                                     let _ = msg_tx.send(response);
@@ -226,16 +237,19 @@ async fn handle_socket(
             }
 
             _ = re_validate.tick() => {
-                if validate_token(&token, &state.jwt_secret).is_err() {
-                    let err_msg = json!({
-                        "type": WS_ERROR,
-                        "data": { "message": "Token expired. Please reconnect." }
-                    }).to_string();
-                    let _ = msg_tx.send(err_msg);
-                    break;
-                }
+                let claims = match validate_token(&token, &state.jwt_secret) {
+                    Ok(claims) => claims,
+                    Err(_) => {
+                        let err_msg = json!({
+                            "type": WS_ERROR,
+                            "data": { "message": "Token expired. Please reconnect." }
+                        }).to_string();
+                        let _ = msg_tx.send(err_msg);
+                        break;
+                    }
+                };
                 match find_user_by_id(user.id, &state.pool).await {
-                    Ok(Some(u)) if u.is_active => {}
+                    Ok(Some(u)) if u.is_active && u.token_version == claims.token_version => {}
                     Ok(_) => {
                         let err_msg = json!({
                             "type": WS_ERROR,
@@ -375,6 +389,7 @@ async fn handle_incoming(
     state: &Arc<ServerState>,
     user: &crate::user::User,
     text: &str,
+    token_version: i64,
 ) -> Result<Option<String>, ErrorResponse> {
     let value: serde_json::Value = serde_json::from_str(text)
         .map_err(|e| ErrorResponse::Json(format!("Invalid WS message JSON: {}", e)))?;
@@ -418,6 +433,11 @@ async fn handle_incoming(
             if !current_user.is_active {
                 return Err(ErrorResponse::Authentication(
                     "User is inactive.".to_string(),
+                ));
+            }
+            if current_user.token_version != token_version {
+                return Err(ErrorResponse::Authentication(
+                    "Session expired. Please reconnect.".to_string(),
                 ));
             }
 

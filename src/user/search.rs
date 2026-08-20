@@ -42,7 +42,7 @@ pub async fn search_users(
     let (rows, count) = match (&params.username, params.user_id) {
         (Some(username), _) => {
             let rows = sqlx::query(
-                "SELECT id, username, nickname FROM users \
+                "SELECT id, username, nickname, bio, avatar FROM users \
                  WHERE is_active = true AND username ILIKE '%' || $1 || '%' \
                  ORDER BY created_at DESC LIMIT $2 OFFSET $3",
             )
@@ -64,7 +64,7 @@ pub async fn search_users(
         }
         (None, Some(user_id)) => {
             let rows = sqlx::query(
-                "SELECT id, username, nickname FROM users \
+                "SELECT id, username, nickname, bio, avatar FROM users \
                  WHERE is_active = true AND id = $1 \
                  ORDER BY created_at DESC LIMIT $2 OFFSET $3",
             )
@@ -95,6 +95,8 @@ pub async fn search_users(
                 "id": row.get::<Uuid, _>("id"),
                 "username": row.get::<String, _>("username"),
                 "nickname": row.get::<Option<String>, _>("nickname"),
+                "bio": row.get::<Option<String>, _>("bio"),
+                "avatar": row.get::<Option<String>, _>("avatar"),
             })
         })
         .collect();

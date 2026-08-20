@@ -39,13 +39,23 @@ pub async fn authenticate(
     })?;
 
     let user = find_user_by_id(user_id, &state.pool).await?;
-    match user {
+    match &user {
         Some(user) if user.is_active => {}
         _ => {
             return Err(ErrorResponse::Authentication(
                 "User not found or inactive.".to_string(),
             ));
         }
+    }
+
+    // The token carries the version in effect when it was issued; a logout
+    // or password change bumps the stored version, revoking every old token.
+    if let Some(user) = user
+        && claims.token_version != user.token_version
+    {
+        return Err(ErrorResponse::Authentication(
+            "Session expired. Please log in again.".to_string(),
+        ));
     }
 
     let mut request = request;

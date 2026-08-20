@@ -13,6 +13,8 @@ pub struct ServerConfiguration {
     pub websocket: WebSocketConfiguration,
     #[serde(default)]
     pub room_request: RoomRequestConfiguration,
+    #[serde(default)]
+    pub avatar: AvatarConfiguration,
 }
 
 // Web server configuration
@@ -131,6 +133,21 @@ impl Default for RoomRequestConfiguration {
     }
 }
 
+// Avatar configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarConfiguration {
+    #[serde(default = "default_avatar_max_bytes")]
+    pub max_bytes: u32,
+}
+
+impl Default for AvatarConfiguration {
+    fn default() -> Self {
+        Self {
+            max_bytes: default_avatar_max_bytes(),
+        }
+    }
+}
+
 // Default value functions
 fn default_max_body_size() -> u32 {
     10 * 1024 * 1024 // 10 MB
@@ -198,6 +215,9 @@ fn default_room_request_pending_max() -> u32 {
 fn default_room_request_send_daily_limit() -> u32 {
     20 // per sender, 24h window
 }
+fn default_avatar_max_bytes() -> u32 {
+    2 * 1024 * 1024 // 2 MB
+}
 
 impl Default for ServerConfiguration {
     fn default() -> Self {
@@ -225,6 +245,9 @@ impl Default for ServerConfiguration {
             rate_limit: RateLimitConfiguration::default(),
             websocket: WebSocketConfiguration::default(),
             room_request: RoomRequestConfiguration::default(),
+            avatar: AvatarConfiguration {
+                max_bytes: default_avatar_max_bytes(),
+            },
         }
     }
 }
@@ -386,6 +409,15 @@ pending_max = 50
 # Maximum number of room requests a single user can send per day (24h
 # sliding window). When omitted, defaults to 20.
 send_daily_limit = 20
+
+# ---- Avatar ----
+
+[avatar]
+# The maximum size of an uploaded avatar image in bytes.
+# When omitted, defaults to 2097152 (2 MB).
+#
+# Uploads exceeding this size are rejected with a 413 Payload Too Large.
+max_bytes = 2097152
 "#
         .to_string()
     }
@@ -467,6 +499,10 @@ send_daily_limit = 20
         }
         if self.room_request.send_daily_limit == 0 {
             bail!("The room request send daily limit cannot be 0.");
+        }
+
+        if self.avatar.max_bytes == 0 {
+            bail!("The avatar max bytes cannot be 0.");
         }
 
         Ok(())
