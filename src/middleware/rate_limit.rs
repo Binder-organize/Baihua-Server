@@ -11,10 +11,15 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 
+struct RateLimitState {
+    entries: HashMap<IpAddr, Vec<Instant>>,
+    last_sweep: Instant,
+}
+
 pub(crate) struct SlidingWindowRateLimiter {
     max_requests: u32,
     window_secs: u64,
-    inner: RwLock<HashMap<IpAddr, Vec<Instant>>>,
+    inner: RwLock<RateLimitState>,
 }
 
 impl SlidingWindowRateLimiter {
@@ -22,20 +27,34 @@ impl SlidingWindowRateLimiter {
         Self {
             max_requests,
             window_secs,
-            inner: RwLock::new(HashMap::new()),
+            inner: RwLock::new(RateLimitState {
+                entries: HashMap::new(),
+                last_sweep: Instant::now(),
+            }),
         }
     }
 
     // Returns true if the request should be allowed, false if rate limited.
     pub(crate) async fn allow(&self, ip: IpAddr) -> bool {
-        let mut map = self.inner.write().await;
+        let mut state = self.inner.write().await;
         let now = Instant::now();
         let window = std::time::Duration::from_secs(self.window_secs);
 
-        let entries = map.entry(ip).or_default();
+        // Sweep the whole map once per window to evict IPs that have gone
+        // quiet. Without this, each distinct client IP would leave a permanent
+        // entry and the map would grow without bound over time.
+        if now.duration_since(state.last_sweep) >= window {
+            state.entries.retain(|_, timestamps| {
+                timestamps.retain(|&timestamp| now.duration_since(timestamp) < window);
+                !timestamps.is_empty()
+            });
+            state.last_sweep = now;
+        }
+
+        let entries = state.entries.entry(ip).or_default();
 
         // Prune timestamps outside the window.
-        entries.retain(|&t| now.duration_since(t) < window);
+        entries.retain(|&timestamp| now.duration_since(timestamp) < window);
 
         if entries.len() >= self.max_requests as usize {
             return false;
