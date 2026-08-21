@@ -13,7 +13,7 @@ pub async fn console(command_tx: mpsc::Sender<CommandType>) {
     });
 
     info!("The console is started.");
-    println!("Baihua Server v0.1.3 Console");
+    println!("Baihua Server v0.1.4 Console");
     println!("Type 'help' to get help.");
 
     loop {
