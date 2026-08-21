@@ -119,7 +119,7 @@ async fn ensure_app_directories(app_directory: &Path) -> Result<()> {
 async fn load_or_create_profile(app_directory: &Path) -> Result<ServerConfiguration> {
     let profile_path = app_directory.join("config.toml");
 
-    if profile_path.exists() {
+    let mut configuration = if profile_path.exists() {
         let content = fs::read_to_string(&profile_path)
             .await
             .context("Failed to read the profile.")?;
@@ -129,7 +129,7 @@ async fn load_or_create_profile(app_directory: &Path) -> Result<ServerConfigurat
 
         println!("Initialize: Load the configuration from an existing profile.");
 
-        Ok(configuration)
+        configuration
     } else {
         let configuration = ServerConfiguration::default();
         let toml_content = ServerConfiguration::default_config_content();
@@ -140,6 +140,15 @@ async fn load_or_create_profile(app_directory: &Path) -> Result<ServerConfigurat
 
         println!("Initialize: Create a profile: {:?}.", profile_path);
 
-        Ok(configuration)
+        configuration
+    };
+
+    // Allow the bind host to be overridden via environment variable so the
+    // same binary works for local development (127.0.0.1) and containers
+    // (0.0.0.0) without editing the config file.
+    if let Ok(bind_host) = std::env::var("BIND_HOST") {
+        configuration.web.host = bind_host;
     }
+
+    Ok(configuration)
 }

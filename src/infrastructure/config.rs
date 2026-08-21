@@ -269,10 +269,11 @@ impl ServerConfiguration {
 
 [web]
 # The IP address or hostname to bind the server to.
-# When omitted or left empty, the server binds to all network interfaces
-# ("0.0.0.0"). Set to "127.0.0.1" to accept connections from the
-# loopback address only.
-host = "0.0.0.0"
+# When omitted or left empty, the server binds to the loopback address,
+# equivalent to "127.0.0.1". Set to "0.0.0.0" to accept connections from
+# all network interfaces. Can also be overridden by the BIND_HOST
+# environment variable.
+host = "127.0.0.1"
 
 # The TCP port the server listens on for incoming HTTP and WebSocket
 # connections. Must be between 1 and 65535.
