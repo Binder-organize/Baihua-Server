@@ -21,10 +21,13 @@ pub struct ConnectionManager {
     pending_states: RwLock<HashSet<Uuid>>,
     ready_states: RwLock<HashMap<Uuid, (bool, bool)>>,
     grace_periods: RwLock<HashMap<Uuid, (Uuid, Instant)>>,
+
+    shutdown: broadcast::Sender<()>,
 }
 
 impl ConnectionManager {
     pub fn new() -> Self {
+        let (shutdown, _) = broadcast::channel(1);
         Self {
             rooms: RwLock::new(HashMap::new()),
             user_connections: RwLock::new(HashMap::new()),
@@ -33,6 +36,7 @@ impl ConnectionManager {
             pending_states: RwLock::new(HashSet::new()),
             ready_states: RwLock::new(HashMap::new()),
             grace_periods: RwLock::new(HashMap::new()),
+            shutdown,
         }
     }
 
@@ -271,6 +275,17 @@ impl ConnectionManager {
             .read()
             .expect("ConnectionManager active_sessions lock poisoned");
         map.keys().copied().collect()
+    }
+
+    // Signal every live connection to close so graceful shutdown does not
+    // stall waiting for clients to disconnect on their own.
+    pub fn initiate_shutdown(&self) {
+        let _ = self.shutdown.send(());
+    }
+
+    // Subscribe to the global shutdown signal.
+    pub fn shutdown_notification(&self) -> broadcast::Receiver<()> {
+        self.shutdown.subscribe()
     }
 }
 

@@ -61,7 +61,9 @@ async fn main() -> Result<()> {
         }
     );
 
-    println!("Baihua is an open-source software distributed under the Apache License, Version 2.0.");
+    println!(
+        "Baihua is an open-source software distributed under the Apache License, Version 2.0."
+    );
     println!("No more war, Peace is our dream.");
 
     // Initialize the server.

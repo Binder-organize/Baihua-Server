@@ -59,6 +59,8 @@ pub struct UserConfiguration {
     pub maximum_username_length: u32,
     #[serde(default = "default_jsonwebtoken_expiration_hours")]
     pub jsonwebtoken_expiration_hours: u32,
+    #[serde(default = "default_bcrypt_cost")]
+    pub bcrypt_cost: u32,
 }
 
 // Rate limiting configuration
@@ -96,6 +98,8 @@ pub struct WebSocketConfiguration {
     pub message_rate_window_secs: u64,
     #[serde(default = "default_token_revalidate_interval_secs")]
     pub token_revalidate_interval_secs: u64,
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
 }
 
 impl Default for WebSocketConfiguration {
@@ -105,6 +109,7 @@ impl Default for WebSocketConfiguration {
             message_rate_limit: default_message_rate_limit(),
             message_rate_window_secs: default_message_rate_window_secs(),
             token_revalidate_interval_secs: default_token_revalidate_interval_secs(),
+            allowed_origins: Vec::new(),
         }
     }
 }
@@ -179,6 +184,9 @@ fn default_maximum_username_length() -> u32 {
 fn default_jsonwebtoken_expiration_hours() -> u32 {
     24
 }
+fn default_bcrypt_cost() -> u32 {
+    10
+}
 fn default_login_max_requests() -> u32 {
     60
 }
@@ -241,6 +249,7 @@ impl Default for ServerConfiguration {
                 minimum_username_length: default_username_length(),
                 maximum_username_length: default_maximum_username_length(),
                 jsonwebtoken_expiration_hours: default_jsonwebtoken_expiration_hours(),
+                bcrypt_cost: default_bcrypt_cost(),
             },
             rate_limit: RateLimitConfiguration::default(),
             websocket: WebSocketConfiguration::default(),
@@ -350,6 +359,11 @@ maximum_username_length = 40
 # Must be greater than 0.
 jsonwebtoken_expiration_hours = 24
 
+# The bcrypt cost factor used when hashing passwords. When omitted,
+# defaults to 10. Must be between 4 and 31; higher values are slower but
+# more resistant to brute-force attacks.
+bcrypt_cost = 10
+
 # ---- Rate Limiting ----
 
 [rate_limit]
@@ -390,6 +404,13 @@ message_rate_window_secs = 10
 # Interval (in seconds) between JWT token re-validation checks for an
 # active WebSocket connection. When omitted, defaults to 600 (10 min).
 token_revalidate_interval_secs = 600
+
+# List of browser origins allowed to open a WebSocket connection. When a
+# browser sends an Origin header that is not in this list, the upgrade is
+# rejected with a 403. Non-browser clients (which send no Origin header)
+# are always allowed. When empty, the check is disabled. Set this in
+# production to prevent cross-site WebSocket hijacking.
+allowed_origins = []
 
 # ---- Room Requests ----
 
@@ -460,6 +481,9 @@ max_bytes = 2097152
         }
         if self.user.jsonwebtoken_expiration_hours == 0 {
             bail!("The jsonwebtoken expiration hours cannot be 0.");
+        }
+        if !(4..=31).contains(&self.user.bcrypt_cost) {
+            bail!("The bcrypt cost must be between 4 and 31.");
         }
 
         if self.rate_limit.login_max_requests == 0 {

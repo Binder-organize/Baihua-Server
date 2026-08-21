@@ -9,7 +9,7 @@ mod search;
 
 use crate::common::error::ErrorResponse;
 use crate::{ServerState, middleware};
-use bcrypt::{DEFAULT_COST, hash};
+use bcrypt::hash;
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -120,6 +120,7 @@ impl UserRegister {
 
 pub async fn new_user(
     new_user: UserRegister,
+    bcrypt_cost: u32,
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<User, ErrorResponse> {
     // Validate the user.
@@ -143,7 +144,7 @@ pub async fn new_user(
     let created_at = Utc::now();
 
     // Hash password.
-    let password_hashed = hash(new_user.password, DEFAULT_COST).map_err(|error| {
+    let password_hashed = hash(new_user.password, bcrypt_cost).map_err(|error| {
         ErrorResponse::InternalError(format!("Hash password failed: {}.", error))
     })?;
 

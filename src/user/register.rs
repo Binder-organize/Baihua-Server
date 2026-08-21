@@ -12,7 +12,7 @@ pub async fn register(
     State(state): State<Arc<ServerState>>,
     JsonBody(user): JsonBody<UserRegister>,
 ) -> Result<StandardResponse, ErrorResponse> {
-    let user_created = new_user(user, &state.pool).await?;
+    let user_created = new_user(user, state.configuration.user.bcrypt_cost, &state.pool).await?;
 
     Ok(StandardResponse::success(
         StatusCode::CREATED,

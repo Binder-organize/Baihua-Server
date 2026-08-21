@@ -48,9 +48,10 @@ pub async fn change_password(
         ));
     }
 
-    let new_hash = hash(request.new_password, bcrypt::DEFAULT_COST).map_err(|error| {
-        ErrorResponse::InternalError(format!("Hash password failed: {}.", error))
-    })?;
+    let new_hash =
+        hash(request.new_password, state.configuration.user.bcrypt_cost).map_err(|error| {
+            ErrorResponse::InternalError(format!("Hash password failed: {}.", error))
+        })?;
 
     // Bump token_version so every previously issued JWT (other devices
     // included) stops passing the version check.

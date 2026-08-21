@@ -80,6 +80,8 @@ pub async fn server(
                 }
             }
         }
+
+        state.connection_manager.initiate_shutdown();
     };
 
     // Start the server with graceful shutdown and proper error handling.

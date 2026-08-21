@@ -59,6 +59,22 @@ pub async fn ws_handler(
     headers: HeaderMap,
     State(state): State<Arc<ServerState>>,
 ) -> Result<impl IntoResponse, ErrorResponse> {
+    // Reject browser-originated upgrades whose Origin is not allowlisted.
+    // Non-browser clients (CLI, native apps) send no Origin header and are
+    // always allowed.
+    if let Some(origin) = headers.get("origin").and_then(|value| value.to_str().ok()) {
+        let allowed = &state.configuration.websocket.allowed_origins;
+        if !allowed.is_empty()
+            && !allowed
+                .iter()
+                .any(|allowed_origin| allowed_origin == origin)
+        {
+            return Err(ErrorResponse::Forbidden(
+                "Origin is not allowed.".to_string(),
+            ));
+        }
+    }
+
     let token = extract_ws_token(&headers)?;
     let claims = validate_token(&token, &state.jwt_secret)?;
 
@@ -102,6 +118,8 @@ async fn handle_socket(
 
     // Per-connection channels (created first so we can send error messages).
     let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<String>();
+
+    let mut shutdown_rx = manager.shutdown_notification();
 
     // Split the WebSocket into sender + receiver halves.
     let (mut ws_sender, mut ws_receiver) = socket.split();
@@ -267,6 +285,11 @@ async fn handle_socket(
                         let _ = msg_tx.send(err_msg);
                     }
                 }
+            }
+
+            _ = shutdown_rx.recv() => {
+                let _ = ws_sender.send(Message::Close(None)).await;
+                break;
             }
         }
     }
