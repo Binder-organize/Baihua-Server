@@ -67,7 +67,7 @@ def _register_and_login(
     )
     assert login_resp.status_code == 200, login_resp.text
     body = login_resp.json()
-    assert body["error_code"] == "OK"
+    assert body["code"] == "SUCCESS"
     return body["data"]["token"], user
 
 
@@ -119,6 +119,39 @@ def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _create_encrypted_room(
+    session: requests.Session,
+    base_url: str,
+    token_a: str,
+    token_b: str,
+    user_b: dict,
+    is_encrypted: bool = True,
+) -> str:
+    """Create a private room through the room-request accept flow.
+
+    User A sends a room request to user B, then B accepts it, which is
+    what actually creates the private room with the requested encryption
+    flag. Returns the new room id."""
+    resp = session.post(
+        f"{base_url}/api/v1/chat/rooms/requests",
+        json={
+            "receiver_id": user_b["id"],
+            "message": "Room request for encrypted chat test",
+            "is_encrypted": is_encrypted,
+        },
+        headers=_auth(token_a),
+    )
+    assert resp.status_code == 201, resp.text
+    request_id = resp.json()["data"]["request_id"]
+
+    resp = session.post(
+        f"{base_url}/api/v1/chat/rooms/requests/{request_id}/accept",
+        headers=_auth(token_b),
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]["room"]["id"]
+
+
 # ── shared state ───────────────────────────────────────────────────
 
 class _State:
@@ -157,31 +190,31 @@ class EncryptedChatTest:
     ) -> None:
         """E1 – Create an encrypted private room.
 
-        Register A and B, create room with is_encrypted=true.
-        Expect 201, room has is_encrypted=true, 2 members."""
+        Register A and B, then go through the room-request accept flow
+        with is_encrypted=true. The accepted room must be encrypted,
+        non-group, with both users as members."""
         token_a, user_a = _register_and_login(session, base_url, prefix="ence1a")
         token_b, user_b = _register_and_login(session, base_url, prefix="ence1b")
 
-        resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"], "is_encrypted": True},
+        room_id = _create_encrypted_room(session, base_url, token_a, token_b, user_b)
+        uuid.UUID(room_id)
+
+        # Verify the accepted room carries the encryption flag and both members.
+        resp = session.get(
+            f"{base_url}/api/v1/chat/rooms/{room_id}",
             headers=_auth(token_a),
         )
-        assert resp.status_code == 201, resp.text
-        body = resp.json()
-        assert body["error_code"] == "OK"
-        data = body["data"]
-
-        room_id = data["id"]
-        uuid.UUID(room_id)
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
 
         assert data["is_encrypted"] is True
         assert data["is_group"] is False
 
         members = data["members"]
         assert len(members) == 2
-        assert user_a["id"] in members
-        assert user_b["id"] in members
+        member_ids = [m["user_id"] for m in members]
+        assert user_a["id"] in member_ids
+        assert user_b["id"] in member_ids
 
         EncryptedChatTest.room_id = room_id
         EncryptedChatTest.token_a = token_a
@@ -371,13 +404,7 @@ class EncryptedChatTest:
         # Register fresh users and create an encrypted room for this test
         token_a, user_a = _register_and_login(session, base_url, prefix="ence7a")
         token_b, user_b = _register_and_login(session, base_url, prefix="ence7b")
-        resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"], "is_encrypted": True},
-            headers=_auth(token_a),
-        )
-        assert resp.status_code == 201, resp.text
-        room_id = resp.json()["data"]["id"]
+        room_id = _create_encrypted_room(session, base_url, token_a, token_b, user_b)
 
         ws_a = _ws_connect(ws_base, token_a)
         try:
@@ -496,13 +523,7 @@ class EncryptedChatTest:
 
         token_a, user_a = _register_and_login(session, base_url, prefix="ence9a")
         token_b, user_b = _register_and_login(session, base_url, prefix="ence9b")
-        resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"], "is_encrypted": True},
-            headers=_auth(token_a),
-        )
-        assert resp.status_code == 201, resp.text
-        room_id = resp.json()["data"]["id"]
+        room_id = _create_encrypted_room(session, base_url, token_a, token_b, user_b)
 
         ws_a = _ws_connect(ws_base, token_a)
         try:
@@ -626,13 +647,7 @@ class EncryptedChatTest:
 
         token_a, user_a = _register_and_login(session, base_url, prefix="ence11a")
         token_b, user_b = _register_and_login(session, base_url, prefix="ence11b")
-        resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"], "is_encrypted": True},
-            headers=_auth(token_a),
-        )
-        assert resp.status_code == 201, resp.text
-        room_id = resp.json()["data"]["id"]
+        room_id = _create_encrypted_room(session, base_url, token_a, token_b, user_b)
 
         ws_a = _ws_connect(ws_base, token_a)
         try:
@@ -730,13 +745,9 @@ class EncryptedChatTest:
                     session, base_url, prefix="ence12d"
                 )
 
-                resp = session.post(
-                    f"{base_url}/api/v1/chat/rooms",
-                    json={"username": user_d["username"], "is_encrypted": True},
-                    headers=_auth(token_c),
+                room_id = _create_encrypted_room(
+                    session, base_url, token_c, token_d, user_d
                 )
-                assert resp.status_code == 201, resp.text
-                room_id = resp.json()["data"]["id"]
 
                 # Create WS for C and D
                 ws_c = _ws_connect(ws_base, token_c)
@@ -815,13 +826,7 @@ class EncryptedChatTest:
 
         token_a, user_a = _register_and_login(session, base_url, prefix="ence13a")
         token_b, user_b = _register_and_login(session, base_url, prefix="ence13b")
-        resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"], "is_encrypted": True},
-            headers=_auth(token_a),
-        )
-        assert resp.status_code == 201, resp.text
-        room_id = resp.json()["data"]["id"]
+        room_id = _create_encrypted_room(session, base_url, token_a, token_b, user_b)
 
         ws_a = _ws_connect(ws_base, token_a)
         try:
@@ -852,13 +857,7 @@ class EncryptedChatTest:
 
         token_a, user_a = _register_and_login(session, base_url, prefix="ence14a")
         token_b, user_b = _register_and_login(session, base_url, prefix="ence14b")
-        resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"], "is_encrypted": True},
-            headers=_auth(token_a),
-        )
-        assert resp.status_code == 201, resp.text
-        room_id = resp.json()["data"]["id"]
+        room_id = _create_encrypted_room(session, base_url, token_a, token_b, user_b)
 
         ws_a = _ws_connect(ws_base, token_a)
         try:
@@ -892,13 +891,7 @@ class EncryptedChatTest:
 
         token_a, user_a = _register_and_login(session, base_url, prefix="ence15a")
         token_b, user_b = _register_and_login(session, base_url, prefix="ence15b")
-        resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"], "is_encrypted": True},
-            headers=_auth(token_a),
-        )
-        assert resp.status_code == 201, resp.text
-        room_id = resp.json()["data"]["id"]
+        room_id = _create_encrypted_room(session, base_url, token_a, token_b, user_b)
 
         ws_a = _ws_connect(ws_base, token_a)
         try:
@@ -923,25 +916,12 @@ class EncryptedChatTest:
         token_a, user_a = _register_and_login(session, base_url, prefix="ence16a")
         token_b, user_b = _register_and_login(session, base_url, prefix="ence16b")
 
-        resp_plain = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"]},
-            headers=_auth(token_a),
+        plain_id = _create_encrypted_room(
+            session, base_url, token_a, token_b, user_b, is_encrypted=False
         )
-        assert resp_plain.status_code == 201, resp_plain.text
-        plain_room = resp_plain.json()["data"]
-        assert plain_room["is_encrypted"] is False
-        plain_id = plain_room["id"]
-
-        resp_enc = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"], "is_encrypted": True},
-            headers=_auth(token_a),
+        enc_id = _create_encrypted_room(
+            session, base_url, token_a, token_b, user_b, is_encrypted=True
         )
-        assert resp_enc.status_code == 201, resp_enc.text
-        enc_room = resp_enc.json()["data"]
-        assert enc_room["is_encrypted"] is True
-        enc_id = enc_room["id"]
 
         assert plain_id != enc_id
 

@@ -1,18 +1,17 @@
 use crate::ServerState;
+use crate::common::StandardResponse;
 use crate::common::error::ErrorResponse;
-use crate::common::success::SuccessResponse;
+use crate::common::extractor::JsonBody;
 use crate::middleware::authenticate::AuthenticatedUser;
 use crate::user::find_user_by_username;
 use axum::Extension;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::{Json, extract::rejection::JsonRejection};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 use std::sync::Arc;
-use tracing::error;
 use uuid::Uuid;
 
 use crate::chat::ROLE_MEMBER;
@@ -28,10 +27,8 @@ pub async fn add_members(
     State(state): State<Arc<ServerState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(room_id): Path<Uuid>,
-    body: Result<Json<AddMembersRequest>, JsonRejection>,
-) -> Result<SuccessResponse, ErrorResponse> {
-    let Json(request) = body.map_err(|error| ErrorResponse::Json(error.to_string()))?;
-
+    JsonBody(request): JsonBody<AddMembersRequest>,
+) -> Result<StandardResponse, ErrorResponse> {
     if request.usernames.is_empty() {
         return Err(ErrorResponse::BadRequest(
             "usernames list cannot be empty.".to_string(),
@@ -57,9 +54,13 @@ pub async fn add_members(
     let now = Utc::now();
 
     for username in &request.usernames {
-        let user = find_user_by_username(username, &state.pool).await?.ok_or(
-            ErrorResponse::BadRequest(format!("User not found: {}", username)),
-        )?;
+        let user =
+            find_user_by_username(username, &state.pool)
+                .await?
+                .ok_or(ErrorResponse::NotFound(format!(
+                    "User not found: {}",
+                    username
+                )))?;
 
         // Check if already a member.
         let already_member =
@@ -67,11 +68,7 @@ pub async fn add_members(
                 .bind(room_id)
                 .bind(user.id)
                 .fetch_optional(&state.pool)
-                .await
-                .map_err(|error| {
-                    error!("Failed to check membership: {}", error);
-                    ErrorResponse::InternalError("Failed to check membership.".to_string())
-                })?;
+                .await?;
 
         if already_member.is_some() {
             continue; // Skip users who are already members.
@@ -85,11 +82,7 @@ pub async fn add_members(
         .bind(now)
         .bind(ROLE_MEMBER)
         .execute(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to add member: {}", error);
-            ErrorResponse::InternalError("Failed to add member.".to_string())
-        })?;
+        .await?;
 
         added.push(json!({
             "user_id": user.id,
@@ -98,7 +91,7 @@ pub async fn add_members(
         }));
     }
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Members added successfully.".to_string(),
         json!({
@@ -113,7 +106,7 @@ pub async fn list_members(
     State(state): State<Arc<ServerState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(room_id): Path<Uuid>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     // Verify the requester is a room member.
     if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
         return Err(ErrorResponse::Forbidden(
@@ -130,11 +123,7 @@ pub async fn list_members(
     )
     .bind(room_id)
     .fetch_all(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to list members: {}", error);
-        ErrorResponse::InternalError("Failed to list members.".to_string())
-    })?;
+    .await?;
 
     let members: Vec<serde_json::Value> = member_rows
         .iter()
@@ -149,7 +138,7 @@ pub async fn list_members(
         })
         .collect();
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Members listed successfully.".to_string(),
         json!({
@@ -168,7 +157,7 @@ pub async fn remove_member(
     State(state): State<Arc<ServerState>>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path((room_id, target_user_id)): Path<(Uuid, Uuid)>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     // Verify the requester is a room member.
     if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
         return Err(ErrorResponse::Forbidden(
@@ -179,12 +168,8 @@ pub async fn remove_member(
     let room_info = sqlx::query("SELECT is_group FROM rooms WHERE id = $1")
         .bind(room_id)
         .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to get room info: {}", error);
-            ErrorResponse::InternalError("Failed to get room info.".to_string())
-        })?
-        .ok_or(ErrorResponse::BadRequest("Room not found.".to_string()))?;
+        .await?
+        .ok_or(ErrorResponse::NotFound("Room not found.".to_string()))?;
 
     let is_group: bool = room_info.get("is_group");
 
@@ -203,7 +188,7 @@ async fn handle_leave(
     room_id: Uuid,
     user_id: Uuid,
     is_group: bool,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     // Guard: verify the user is actually a member of this room.
     if !is_room_member(&state.pool, room_id, user_id).await? {
         return Err(ErrorResponse::Forbidden(
@@ -218,17 +203,13 @@ async fn handle_leave(
         sqlx::query("DELETE FROM rooms WHERE id = $1")
             .bind(room_id)
             .execute(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to delete room: {}", error);
-                ErrorResponse::InternalError("Failed to delete room.".to_string())
-            })?;
+            .await?;
 
         state
             .connection_manager
             .cancel_subscription(user_id, room_id);
 
-        return Ok(SuccessResponse::new(
+        return Ok(StandardResponse::success(
             StatusCode::OK,
             "You left the room. The room has been deleted as you were the last member.".to_string(),
             json!({
@@ -249,17 +230,13 @@ async fn handle_leave(
         .bind(room_id)
         .bind(user_id)
         .execute(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to remove member: {}", error);
-            ErrorResponse::InternalError("Failed to remove member.".to_string())
-        })?;
+        .await?;
 
     state
         .connection_manager
         .cancel_subscription(user_id, room_id);
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "You have left the room.".to_string(),
         json!({
@@ -277,7 +254,7 @@ async fn handle_kick(
     actor_id: Uuid,
     target_user_id: Uuid,
     is_group: bool,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     // Kicking is only allowed in group rooms.
     if !is_group {
         return Err(ErrorResponse::Forbidden(
@@ -307,11 +284,7 @@ async fn handle_kick(
         .bind(room_id)
         .bind(target_user_id)
         .execute(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to remove member: {}", error);
-            ErrorResponse::InternalError("Failed to remove member.".to_string())
-        })?;
+        .await?;
 
     state
         .connection_manager
@@ -322,7 +295,7 @@ async fn handle_kick(
         auto_promote_admin(&state.pool, room_id, target_user_id).await?;
     }
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Member removed successfully.".to_string(),
         json!({

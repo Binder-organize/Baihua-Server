@@ -8,7 +8,7 @@ pub enum Environment {
 }
 
 impl Environment {
-    pub fn from_env() -> Self {
+    pub fn from_environment() -> Self {
         match env::var("BAIHUA_ENV").as_deref() {
             Ok("production") => Environment::Production,
             _ => Environment::Development,
@@ -25,26 +25,24 @@ impl Environment {
 
     // In production: require the variable to exist, else hard failure.
     // In development: fall back to the provided default.
-    pub fn require_var(&self, name: &str, dev_default: &str) -> Result<String> {
+    pub fn require_variable(&self, name: &str, development_default: &str) -> Result<String> {
         match env::var(name) {
-            Ok(val) => Ok(val),
+            Ok(value) => Ok(value),
             Err(_) => {
                 if self.is_production() {
                     Err(anyhow::anyhow!(
                         "Required environment variable '{}' is not set.",
                         name
                     ))
-                } else if self.is_development() {
-                    Ok(dev_default.to_string())
                 } else {
-                    unreachable!()
+                    Ok(development_default.to_string())
                 }
             }
         }
     }
 
     // Read an environment variable with a fallback default.
-    pub fn var_or(&self, name: &str, default: &str) -> String {
+    pub fn variable_or(&self, name: &str, default: &str) -> String {
         env::var(name).unwrap_or_else(|_| default.to_string())
     }
 }

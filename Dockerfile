@@ -48,11 +48,9 @@ COPY --from=builder /app/target/release/baihua-server .
 # (looks for ./migrations/ relative to the binary in production mode)
 COPY --from=builder /app/migrations/ migrations/
 
-# Pre-create the app data directory with a production-ready config.
-# The default config (host = "127.0.0.1") is unsuitable inside a container
-# where the server must listen on all interfaces.
+# Pre-create the app data directory. The server auto-generates a
+# production-ready config.toml on first startup via load_or_create_profile().
 RUN mkdir -p /app/.baihua/logs \
-    && printf '[server]\nhost = "0.0.0.0"\nport = 2424\n\n[log]\nlevel = "info"\n\n[database]\nmax_connections = 20\nmin_connections = 5\n\n[user]\nminimum_username_length = 3\nmaximum_username_length = 40\njsonwebtoken_expiration_hours = 24\n' > /app/.baihua/config.toml \
     && chown -R baihua:baihua /app
 
 EXPOSE 2424

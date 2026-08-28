@@ -9,12 +9,14 @@ pub struct Claims {
     pub sub: String,
     pub iat: i64,
     pub exp: i64,
+    pub token_version: i64,
 }
 
 pub async fn generate_token(
     secret: &str,
     expiration_hours: u32,
     user_id: &str,
+    token_version: i64,
 ) -> Result<String, ErrorResponse> {
     let expiration = Utc::now()
         .checked_add_signed(Duration::hours(expiration_hours as i64))
@@ -28,6 +30,7 @@ pub async fn generate_token(
         sub: user_id.to_string(),
         iat: Utc::now().timestamp(),
         exp: expiration,
+        token_version,
     };
 
     encode(

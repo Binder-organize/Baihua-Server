@@ -46,7 +46,7 @@ def _register_and_login(
     )
     assert login_resp.status_code == 200, login_resp.text
     body = login_resp.json()
-    assert body["error_code"] == "OK"
+    assert body["code"] == "SUCCESS"
     return body["data"]["token"], user
 
 
@@ -116,12 +116,23 @@ class TestMessageValidation:
         token_b, user_b = _register_and_login(session, base_url, prefix="valfb")
 
         resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"]},
+            f"{base_url}/api/v1/chat/rooms/requests",
+            json={
+                "receiver_id": user_b["id"],
+                "message": "hi",
+                "is_encrypted": False,
+            },
             headers=_auth(token_a),
         )
         assert resp.status_code == 201, resp.text
-        room_id = resp.json()["data"]["id"]
+        request_id = resp.json()["data"]["request_id"]
+
+        resp = session.post(
+            f"{base_url}/api/v1/chat/rooms/requests/{request_id}/accept",
+            headers=_auth(token_b),
+        )
+        assert resp.status_code == 200, resp.text
+        room_id = resp.json()["data"]["room"]["id"]
 
         ws_base = base_url.replace("http", "ws")
         ws = _ws_connect(ws_base, token_a)

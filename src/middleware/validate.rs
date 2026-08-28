@@ -1,16 +1,16 @@
+use crate::ServerState;
 use crate::common::error::ErrorResponse;
-use crate::infrastructure::environment::Environment;
 use axum::body::Body as HttpBody;
 use axum::body::Bytes;
+use axum::extract::State;
 use axum::http;
 use axum::http::{HeaderMap, Request};
 use axum::{middleware::Next, response::Response};
 use serde_json::Value;
-
-const MAX_BODY_SIZE_PRODUCTION: usize = 1024 * 1024; // 1 MB
-const MAX_BODY_SIZE_DEVELOPMENT: usize = 10 * 1024 * 1024; // 10 MB
+use std::sync::Arc;
 
 async fn validate_json_body(
+    max_body_size: usize,
     headers: &HeaderMap,
     request: Request<HttpBody>,
 ) -> Result<(http::request::Parts, Bytes, Value), ErrorResponse> {
@@ -25,19 +25,16 @@ async fn validate_json_body(
         ));
     }
 
-    let max_size = if Environment::from_env().is_production() {
-        MAX_BODY_SIZE_PRODUCTION
-    } else if Environment::from_env().is_development() {
-        MAX_BODY_SIZE_DEVELOPMENT
-    } else {
-        unreachable!()
-    };
-
     let (parts, body) = request.into_parts();
 
-    let body_bytes = axum::body::to_bytes(body, max_size).await.map_err(|_| {
-        ErrorResponse::BadRequest(format!("Request body too large (max {} bytes).", max_size))
-    })?;
+    let body_bytes = axum::body::to_bytes(body, max_body_size)
+        .await
+        .map_err(|_| {
+            ErrorResponse::PayloadTooLarge(format!(
+                "Request body too large (max {} bytes).",
+                max_body_size
+            ))
+        })?;
 
     let json_value: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ErrorResponse::Json(format!("Invalid JSON format: {}.", e)))?;
@@ -46,11 +43,14 @@ async fn validate_json_body(
 }
 
 pub async fn validate_register(
+    state: State<Arc<ServerState>>,
     headers: HeaderMap,
     request: Request<HttpBody>,
     next: Next,
 ) -> Result<Response, ErrorResponse> {
-    let (parts, body_bytes, json_value) = validate_json_body(&headers, request).await?;
+    let max_body_size = state.configuration.web.max_body_size as usize;
+    let (parts, body_bytes, json_value) =
+        validate_json_body(max_body_size, &headers, request).await?;
 
     json_value
         .get("username")
@@ -75,11 +75,14 @@ pub async fn validate_register(
 }
 
 pub async fn validate_login(
+    state: State<Arc<ServerState>>,
     headers: HeaderMap,
     request: Request<HttpBody>,
     next: Next,
 ) -> Result<Response, ErrorResponse> {
-    let (parts, body_bytes, json_value) = validate_json_body(&headers, request).await?;
+    let max_body_size = state.configuration.web.max_body_size as usize;
+    let (parts, body_bytes, json_value) =
+        validate_json_body(max_body_size, &headers, request).await?;
 
     json_value
         .get("username")

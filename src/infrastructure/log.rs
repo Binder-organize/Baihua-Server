@@ -1,5 +1,5 @@
 use crate::Directory;
-use crate::infrastructure::config::AppConfigure;
+use crate::infrastructure::config::ServerConfiguration;
 use crate::infrastructure::environment::Environment;
 use tracing::subscriber::set_global_default;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
@@ -11,11 +11,11 @@ use tracing_subscriber::{
 
 pub fn init_log(
     directory: &Directory,
-    configure: &AppConfigure,
+    configuration: &ServerConfiguration,
     env: Environment,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard, Box<dyn std::error::Error>> {
     let logs_dir = directory.log.clone();
-    let config = &configure.log;
+    let config = &configuration.logs;
 
     // Create a log directory.
     let file_appender = RollingFileAppender::builder()
@@ -39,7 +39,7 @@ pub fn init_log(
             .with_ansi(false)
             .with_span_events(FmtSpan::CLOSE)
             .with_current_span(false)
-            .with_thread_names(false);
+            .with_thread_names(true);
 
         let stdout = fmt::layer()
             .with_writer(std::io::stderr)
@@ -52,7 +52,9 @@ pub fn init_log(
         let subscriber = Registry::default().with(filter).with(stdout).with(file);
 
         set_global_default(subscriber)?;
+
         tracing::info!("Log system initialization complete.");
+
         return Ok(guard);
     }
 
@@ -77,6 +79,8 @@ pub fn init_log(
     let subscriber = Registry::default().with(filter).with(stdout).with(file);
 
     set_global_default(subscriber)?;
+
     tracing::info!("Log system initialization complete.");
+
     Ok(guard)
 }

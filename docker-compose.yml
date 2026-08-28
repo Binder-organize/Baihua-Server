@@ -26,6 +26,7 @@ services:
       - "2424:2424"
     environment:
       BAIHUA_ENV: production
+      BIND_HOST: "0.0.0.0"
       JWT_SECRET: ${JWT_SECRET}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

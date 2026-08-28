@@ -1,7 +1,7 @@
 use crate::ServerState;
 use crate::chat::{find_room_by_id, is_room_member};
+use crate::common::StandardResponse;
 use crate::common::error::ErrorResponse;
-use crate::common::success::SuccessResponse;
 use crate::middleware::authenticate::AuthenticatedUser;
 use axum::Extension;
 use axum::extract::{Path, Query, State};
@@ -11,7 +11,6 @@ use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 use std::sync::Arc;
-use tracing::error;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -25,7 +24,7 @@ pub async fn get_messages(
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(room_id): Path<Uuid>,
     Query(params): Query<GetMessagesQuery>,
-) -> Result<SuccessResponse, ErrorResponse> {
+) -> Result<StandardResponse, ErrorResponse> {
     find_room_by_id(&state.pool, room_id).await?;
 
     if !is_room_member(&state.pool, room_id, auth_user.user_id).await? {
@@ -37,11 +36,7 @@ pub async fn get_messages(
     let is_encrypted: bool = sqlx::query_scalar("SELECT is_encrypted FROM rooms WHERE id = $1")
         .bind(room_id)
         .fetch_one(&state.pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to check encrypted flag: {}", error);
-            ErrorResponse::InternalError("Failed to check encrypted flag.".to_string())
-        })?;
+        .await?;
 
     let limit = params.limit.unwrap_or(50).min(100);
 
@@ -81,11 +76,7 @@ pub async fn get_messages(
             .bind(limit + 1)
             .fetch_all(&state.pool)
             .await
-    }
-    .map_err(|error| {
-        error!("Failed to get messages: {}", error);
-        ErrorResponse::InternalError("Failed to get messages.".to_string())
-    })?;
+    }?;
 
     let has_more = rows.len() > limit as usize;
     let visible = rows.iter().take(limit as usize);
@@ -100,7 +91,7 @@ pub async fn get_messages(
             json!({
                 "id": row.get::<Uuid, _>("id"),
                 "room_id": row.get::<Uuid, _>("room_id"),
-                "sender_id": row.get::<Uuid, _>("sender_id"),
+                "sender_id": row.get::<Option<Uuid>, _>("sender_id"),
                 content_key: row.get::<Option<String>, _>("content"),
                 "created_at": row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
             })
@@ -114,7 +105,7 @@ pub async fn get_messages(
         None
     };
 
-    Ok(SuccessResponse::new(
+    Ok(StandardResponse::success(
         StatusCode::OK,
         "Messages retrieved successfully.".to_string(),
         json!({

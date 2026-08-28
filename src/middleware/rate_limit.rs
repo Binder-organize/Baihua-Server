@@ -1,31 +1,60 @@
+use crate::ServerState;
+use crate::common::error::ErrorResponse;
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::LazyLock;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 
-struct SlidingWindowRateLimiter {
+struct RateLimitState {
+    entries: HashMap<IpAddr, Vec<Instant>>,
+    last_sweep: Instant,
+}
+
+pub(crate) struct SlidingWindowRateLimiter {
     max_requests: u32,
     window_secs: u64,
-    inner: RwLock<HashMap<IpAddr, Vec<Instant>>>,
+    inner: RwLock<RateLimitState>,
 }
 
 impl SlidingWindowRateLimiter {
+    pub fn new(max_requests: u32, window_secs: u64) -> Self {
+        Self {
+            max_requests,
+            window_secs,
+            inner: RwLock::new(RateLimitState {
+                entries: HashMap::new(),
+                last_sweep: Instant::now(),
+            }),
+        }
+    }
+
     // Returns true if the request should be allowed, false if rate limited.
-    async fn allow(&self, ip: IpAddr) -> bool {
-        let mut map = self.inner.write().await;
+    pub(crate) async fn allow(&self, ip: IpAddr) -> bool {
+        let mut state = self.inner.write().await;
         let now = Instant::now();
         let window = std::time::Duration::from_secs(self.window_secs);
 
-        let entries = map.entry(ip).or_default();
+        // Sweep the whole map once per window to evict IPs that have gone
+        // quiet. Without this, each distinct client IP would leave a permanent
+        // entry and the map would grow without bound over time.
+        if now.duration_since(state.last_sweep) >= window {
+            state.entries.retain(|_, timestamps| {
+                timestamps.retain(|&timestamp| now.duration_since(timestamp) < window);
+                !timestamps.is_empty()
+            });
+            state.last_sweep = now;
+        }
+
+        let entries = state.entries.entry(ip).or_default();
 
         // Prune timestamps outside the window.
-        entries.retain(|&t| now.duration_since(t) < window);
+        entries.retain(|&timestamp| now.duration_since(timestamp) < window);
 
         if entries.len() >= self.max_requests as usize {
             return false;
@@ -35,22 +64,6 @@ impl SlidingWindowRateLimiter {
         true
     }
 }
-
-// Login rate limiter: 60 requests per 60 seconds per IP.
-static LOGIN_LIMITER: LazyLock<SlidingWindowRateLimiter> =
-    LazyLock::new(|| SlidingWindowRateLimiter {
-        max_requests: 60,
-        window_secs: 60,
-        inner: RwLock::new(HashMap::new()),
-    });
-
-// Register rate limiter: 30 requests per 60 seconds per IP.
-static REGISTER_LIMITER: LazyLock<SlidingWindowRateLimiter> =
-    LazyLock::new(|| SlidingWindowRateLimiter {
-        max_requests: 30,
-        window_secs: 60,
-        inner: RwLock::new(HashMap::new()),
-    });
 
 fn extract_client_ip(request: &Request) -> Option<IpAddr> {
     // Priority 1: X-Forwarded-For (standard reverse proxy header).
@@ -73,31 +86,35 @@ fn extract_client_ip(request: &Request) -> Option<IpAddr> {
     None
 }
 
-pub async fn rate_limit_login(request: Request, next: Next) -> Response {
+pub async fn rate_limit_login(
+    state: State<Arc<ServerState>>,
+    request: Request,
+    next: Next,
+) -> Response {
     if let Some(ip) = extract_client_ip(&request)
-        && !LOGIN_LIMITER.allow(ip).await
+        && !state.login_rate_limiter.allow(ip).await
     {
-        let response = crate::common::StandardResponse::error(
-            axum::http::StatusCode::TOO_MANY_REQUESTS,
-            "RATE_LIMIT_ERROR".to_string(),
+        return ErrorResponse::TooManyRequests(
             "Too many login attempts. Please try again later.".to_string(),
-        );
-        return (response.status, axum::Json(response.response)).into_response();
+        )
+        .into_response();
     }
 
     next.run(request).await
 }
 
-pub async fn rate_limit_register(request: Request, next: Next) -> Response {
+pub async fn rate_limit_register(
+    state: State<Arc<ServerState>>,
+    request: Request,
+    next: Next,
+) -> Response {
     if let Some(ip) = extract_client_ip(&request)
-        && !REGISTER_LIMITER.allow(ip).await
+        && !state.register_rate_limiter.allow(ip).await
     {
-        let response = crate::common::StandardResponse::error(
-            axum::http::StatusCode::TOO_MANY_REQUESTS,
-            "RATE_LIMIT_ERROR".to_string(),
+        return ErrorResponse::TooManyRequests(
             "Too many registration attempts. Please try again later.".to_string(),
-        );
-        return (response.status, axum::Json(response.response)).into_response();
+        )
+        .into_response();
     }
 
     next.run(request).await

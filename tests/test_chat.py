@@ -44,7 +44,7 @@ def _register_and_login(
     )
     assert login_resp.status_code == 200, login_resp.text
     body = login_resp.json()
-    assert body["error_code"] == "OK"
+    assert body["code"] == "SUCCESS"
     return body["data"]["token"], user
 
 
@@ -88,10 +88,6 @@ def _recv_until(
 
 # ── shared state (class-level, survives across test methods) ──────────
 
-class _State:
-    """Mutable bag so class-level attributes are easily reassignable."""
-
-
 # ── tests ─────────────────────────────────────────────────────────────
 
 class ChatTest:
@@ -106,30 +102,61 @@ class ChatTest:
     def test_s1_create_private_room(
         self, session: requests.Session, base_url: str
     ) -> None:
-        """S1 – Create private room (happy path).
+        """S1 – Create private room via room request (happy path).
 
-        Register user A (login) and user B (login).  A creates a
-        room with B.  Expect 201, a UUID room id, and 2 members."""
+        Register user A (login) and user B (login).  A sends B a room
+        request, B accepts it, and the server creates the private room.
+        Expect 201 on the request, 200 on the accept, a UUID room id,
+        and exactly 2 members."""
         token_a, user_a = _register_and_login(session, base_url, prefix="chata")
         token_b, user_b = _register_and_login(session, base_url, prefix="chatb")
 
+        # A sends B a private room request
         resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"]},
+            f"{base_url}/api/v1/chat/rooms/requests",
+            json={
+                "receiver_id": user_b["id"],
+                "message": "hello",
+                "is_encrypted": False,
+            },
             headers=self._auth(token_a),
         )
         assert resp.status_code == 201, resp.text
 
         body = resp.json()
-        assert body["error_code"] == "OK"
+        assert body["code"] == "SUCCESS"
         data = body["data"]
+        assert data["status"] == "pending"
+        request_id = data["request_id"]
+
+        # B sees the request in their pending list
+        pending_resp = session.get(
+            f"{base_url}/api/v1/chat/rooms/requests/pending",
+            headers=self._auth(token_b),
+        )
+        assert pending_resp.status_code == 200, pending_resp.text
+        pending_data = pending_resp.json()["data"]
+        pending_ids = [request["id"] for request in pending_data["requests"]]
+        assert request_id in pending_ids
+
+        # B accepts the request and the server creates the private room
+        accept_resp = session.post(
+            f"{base_url}/api/v1/chat/rooms/requests/{request_id}/accept",
+            headers=self._auth(token_b),
+        )
+        assert accept_resp.status_code == 200, accept_resp.text
+
+        accept_body = accept_resp.json()
+        assert accept_body["code"] == "SUCCESS"
+        assert accept_body["data"]["status"] == "accepted"
+        room = accept_body["data"]["room"]
 
         # room id must be a valid UUID
-        room_id = data["id"]
+        room_id = room["id"]
         uuid.UUID(room_id)
 
         # exactly 2 members containing both A and B
-        members = data["members"]
+        members = room["members"]
         assert len(members) == 2
         assert user_a["id"] in members
         assert user_b["id"] in members
@@ -268,7 +295,7 @@ class ChatTest:
         # no auth header → GET rooms
         resp = session.get(f"{base_url}/api/v1/chat/rooms")
         assert resp.status_code == 401, resp.text
-        assert resp.json()["error_code"] == "AUTHENTICATION_ERROR"
+        assert resp.json()["code"] == "AUTHENTICATION_ERROR"
 
         # invalid token → POST rooms
         resp = session.post(
@@ -277,7 +304,7 @@ class ChatTest:
             headers=self._auth("invalid_token"),
         )
         assert resp.status_code == 401, resp.text
-        assert resp.json()["error_code"] == "AUTHENTICATION_ERROR"
+        assert resp.json()["code"] == "AUTHENTICATION_ERROR"
 
     # ── S6 ────────────────────────────────────────────────────────────
 
@@ -296,21 +323,21 @@ class ChatTest:
             headers=self._auth(token_c),
         )
         assert resp.status_code == 403, resp.text
-        assert resp.json()["error_code"] == "FORBIDDEN_ERROR"
+        assert resp.json()["code"] == "FORBIDDEN_ERROR"
 
     # ── S7 ────────────────────────────────────────────────────────────
 
     def test_s7_target_user_not_found(
         self, session: requests.Session, base_url: str
     ) -> None:
-        """S7 – Creating a room with a non-existent username → 400."""
+        """S7 – Creating a room with a non-existent username → 404."""
         resp = session.post(
             f"{base_url}/api/v1/chat/rooms",
             json={"username": "nonexistent_user_12345"},
             headers=self._auth(ChatTest.token_a),
         )
-        assert resp.status_code == 400, resp.text
-        assert resp.json()["error_code"] == "BAD_REQUEST_ERROR"
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["code"] == "NOT_FOUND_ERROR"
 
     # ── S8 ────────────────────────────────────────────────────────────
 
@@ -334,26 +361,30 @@ class ChatTest:
 
     # ── S9 ────────────────────────────────────────────────────────────
 
-    def test_s9_list_users(
+    def test_s9_search_users(
         self, session: requests.Session, base_url: str
     ) -> None:
-        """S9 – List users (auth required).
+        """S9 – Search users (auth required).
 
-        Returns a list; each entry has id, username, email."""
+        Returns a list; each entry has id and username only. Email and
+        phone number are private and must not be exposed."""
         resp = session.get(
-            f"{base_url}/api/v1/user/list",
+            f"{base_url}/api/v1/user/search",
+            params={"username": ChatTest.user_b["username"]},
             headers=self._auth(ChatTest.token_a),
         )
         assert resp.status_code == 200, resp.text
 
         body = resp.json()
+        assert body["code"] == "SUCCESS"
         users = body["data"]["users"]
         assert isinstance(users, list)
         assert len(users) > 0
         for user in users:
             assert "id" in user
             assert "username" in user
-            assert "email" in user
+            assert "email" not in user
+            assert "phone_number" not in user
 
     # ── S10 ───────────────────────────────────────────────────────────
 
@@ -694,13 +725,27 @@ class ChatTest:
         # so we don't depend on state from earlier tests (S21 removes user_b).
         token_a, user_a = _register_and_login(session, base_url, prefix="s22a")
         token_b, user_b = _register_and_login(session, base_url, prefix="s22b")
+
+        # A sends B a private room request
         resp = session.post(
-            f"{base_url}/api/v1/chat/rooms",
-            json={"username": user_b["username"]},
+            f"{base_url}/api/v1/chat/rooms/requests",
+            json={
+                "receiver_id": user_b["id"],
+                "message": "hello",
+                "is_encrypted": False,
+            },
             headers=self._auth(token_a),
         )
         assert resp.status_code == 201, resp.text
-        room_id = resp.json()["data"]["id"]
+        request_id = resp.json()["data"]["request_id"]
+
+        # B accepts the request; take the room id from the accept response
+        accept_resp = session.post(
+            f"{base_url}/api/v1/chat/rooms/requests/{request_id}/accept",
+            headers=self._auth(token_b),
+        )
+        assert accept_resp.status_code == 200, accept_resp.text
+        room_id = accept_resp.json()["data"]["room"]["id"]
 
         ws_base = base_url.replace("http", "ws")
 
@@ -739,3 +784,95 @@ class ChatTest:
                 ws_b.close()
         finally:
             ws_a.close()
+
+
+# ── account deletion preserves chat history ─────────────────────────
+
+class TestDeletedAccountPreservesChat:
+    """Deleting a user must keep rooms and messages; the sender and
+    creator references become NULL so clients can render a deactivated
+    user instead of losing the conversation."""
+
+    @staticmethod
+    def _auth(token: str) -> dict:
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_rooms_and_messages_survive_account_deletion(
+        self, session: requests.Session, base_url: str
+    ) -> None:
+        """A and B chat in a private room, A deletes the account.
+
+        B must still see the room and every message, with A's
+        references nulled out (sender_id / created_by)."""
+        token_a, user_a = _register_and_login(session, base_url, prefix="delchata")
+        token_b, user_b = _register_and_login(session, base_url, prefix="delchatb")
+
+        # A creates a group room containing A and B (no room request needed).
+        resp = session.post(
+            f"{base_url}/api/v1/chat/rooms",
+            json={
+                "is_group": True,
+                "name": "del-test-group",
+                "usernames": [user_b["username"]],
+            },
+            headers=self._auth(token_a),
+        )
+        assert resp.status_code == 201, resp.text
+        room_id = resp.json()["data"]["id"]
+
+        # A sends a message over WebSocket.
+        ws_base = base_url.replace("http", "ws")
+        ws_a = _ws_connect(ws_base, token_a)
+        try:
+            _recv(ws_a)  # consume "connected"
+            ws_a.send(
+                json.dumps({
+                    "type": "send_message",
+                    "data": {"room_id": room_id, "content": "bye from A"},
+                })
+            )
+            ack = _recv_until(ws_a, "message_sent")
+            assert ack["data"]["sender_id"] == user_a["id"]
+        finally:
+            ws_a.close()
+
+        # A deletes the account (password verified).
+        del_resp = session.delete(
+            f"{base_url}/api/v1/user/me",
+            json={"password": "P@ssw0rd!"},
+            headers=self._auth(token_a),
+        )
+        assert del_resp.status_code == 200, del_resp.text
+
+        # B still reads the room message history; A's sender_id is null.
+        msgs = session.get(
+            f"{base_url}/api/v1/chat/rooms/{room_id}/messages",
+            headers=self._auth(token_b),
+        )
+        assert msgs.status_code == 200, msgs.text
+        messages = msgs.json()["data"]["messages"]
+        assert len(messages) == 1, messages
+        assert messages[0]["content"] == "bye from A"
+        assert messages[0]["sender_id"] is None
+
+        # B still sees the room detail; A's creator reference is null.
+        detail = session.get(
+            f"{base_url}/api/v1/chat/rooms/{room_id}",
+            headers=self._auth(token_b),
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["data"]["id"] == room_id
+        assert detail.json()["data"]["created_by"] is None
+
+        # The room still appears in B's room list and the last-message
+        # preview survives with an empty sender username.
+        rooms = session.get(
+            f"{base_url}/api/v1/chat/rooms",
+            headers=self._auth(token_b),
+        )
+        assert rooms.status_code == 200, rooms.text
+        listed = [r for r in rooms.json()["data"]["rooms"] if r["id"] == room_id]
+        assert len(listed) == 1, rooms.text
+        assert listed[0]["last_message"]["content"] == "bye from A"
+        assert listed[0]["last_message"]["sender_username"] is None
+        assert listed[0]["created_by"] is None

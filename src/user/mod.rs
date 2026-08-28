@@ -1,10 +1,15 @@
-mod list;
+pub(crate) mod avatar;
+mod delete;
 mod login;
+mod logout;
+mod password;
+mod profile;
 mod register;
+mod search;
 
 use crate::common::error::ErrorResponse;
 use crate::{ServerState, middleware};
-use bcrypt::{DEFAULT_COST, hash};
+use bcrypt::hash;
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -23,9 +28,15 @@ pub struct User {
     // Optional and repeatable user nickname.
     pub nickname: Option<String>,
     pub phone_number: Option<String>,
+    pub bio: Option<String>,
+    pub avatar: Option<String>,
     // UTC datetime (serialized as RFC 3339).
     pub created_at: DateTime<Utc>,
     pub is_active: bool,
+    // Monotonic counter bumped on logout and password change; used to
+    // invalidate previously issued JWTs. Never exposed to clients.
+    #[serde(skip_serializing)]
+    pub token_version: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -88,6 +99,14 @@ impl UserRegister {
             ));
         }
 
+        // A username that parses as a UUID would make the /user/{user}
+        // lookup ambiguous, so reject it at registration time.
+        if Uuid::parse_str(&self.username).is_ok() {
+            return Err(ErrorResponse::Validation(
+                "Username cannot be in UUID format.".to_string(),
+            ));
+        }
+
         // Can't be mine!
         if self.email == "gav.zheng@outlook.com" {
             return Err(ErrorResponse::Validation(
@@ -101,6 +120,7 @@ impl UserRegister {
 
 pub async fn new_user(
     new_user: UserRegister,
+    bcrypt_cost: u32,
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<User, ErrorResponse> {
     // Validate the user.
@@ -111,11 +131,7 @@ pub async fn new_user(
         .bind(&new_user.username)
         .bind(&new_user.email)
         .fetch_optional(pool)
-        .await
-        .map_err(|error| {
-            error!("Database query failed during user lookup: {}", error);
-            ErrorResponse::InternalError("Failed to check user existence.".to_string())
-        })?;
+        .await?;
 
     if existing_user.is_some() {
         return Err(ErrorResponse::Validation(
@@ -128,8 +144,9 @@ pub async fn new_user(
     let created_at = Utc::now();
 
     // Hash password.
-    let password_hashed = hash(new_user.password, DEFAULT_COST)
-        .map_err(|e| ErrorResponse::InternalError(format!("Hash password failed: {}.", e)))?;
+    let password_hashed = hash(new_user.password, bcrypt_cost).map_err(|error| {
+        ErrorResponse::InternalError(format!("Hash password failed: {}.", error))
+    })?;
 
     // Insert user into database.
     sqlx::query(
@@ -142,14 +159,10 @@ pub async fn new_user(
     .bind(created_at)
     .bind(true)
     .execute(pool)
-        .await
-        .map_err(|e| {
-            error!("Failed to insert user into database: {}", e);
-            ErrorResponse::InternalError("Failed to create user.".to_string())
-        })?;
+        .await?;
 
     info!(
-        "New user: {} is created, id is: {}.",
+        "New user: {} is created, UUID is: {}.",
         new_user.username, &uuid
     );
 
@@ -159,8 +172,11 @@ pub async fn new_user(
         email: new_user.email,
         nickname: None,
         phone_number: None,
+        bio: None,
+        avatar: None,
         created_at,
         is_active: true,
+        token_version: 0,
     })
 }
 
@@ -170,16 +186,12 @@ pub async fn find_user_by_id(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<Option<User>, ErrorResponse> {
     let row = sqlx::query(
-        r#"SELECT id, username, email, nickname, phone_number, created_at, is_active
+        r#"SELECT id, username, email, nickname, phone_number, bio, avatar, created_at, is_active, token_version
            FROM users WHERE id = $1"#,
     )
     .bind(id)
     .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        error!("Database query failed during user lookup: {}", e);
-        ErrorResponse::InternalError("Failed to query user.".to_string())
-    })?;
+    .await?;
 
     match row {
         Some(row) => Ok(Some(User {
@@ -188,8 +200,11 @@ pub async fn find_user_by_id(
             email: row.get("email"),
             nickname: row.get("nickname"),
             phone_number: row.get("phone_number"),
+            bio: row.get("bio"),
+            avatar: row.get("avatar"),
             created_at: row.get("created_at"),
             is_active: row.get("is_active"),
+            token_version: row.get("token_version"),
         })),
         None => Ok(None),
     }
@@ -201,16 +216,12 @@ pub async fn find_user_by_username(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<Option<User>, ErrorResponse> {
     let row = sqlx::query(
-        r#"SELECT id, username, email, nickname, phone_number, created_at, is_active
+        r#"SELECT id, username, email, nickname, phone_number, bio, avatar, created_at, is_active, token_version
            FROM users WHERE username = $1"#,
     )
     .bind(username)
     .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        error!("Database query failed during user lookup: {}", e);
-        ErrorResponse::InternalError("Failed to query user.".to_string())
-    })?;
+    .await?;
 
     match row {
         Some(row) => Ok(Some(User {
@@ -219,8 +230,11 @@ pub async fn find_user_by_username(
             email: row.get("email"),
             nickname: row.get("nickname"),
             phone_number: row.get("phone_number"),
+            bio: row.get("bio"),
+            avatar: row.get("avatar"),
             created_at: row.get("created_at"),
             is_active: row.get("is_active"),
+            token_version: row.get("token_version"),
         })),
         None => Ok(None),
     }
@@ -231,16 +245,12 @@ pub async fn find_user_with_password(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<Option<(User, String)>, ErrorResponse> {
     let row = sqlx::query(
-        r#"SELECT id, username, email, password, nickname, phone_number, created_at, is_active
+        r#"SELECT id, username, email, password, nickname, phone_number, bio, avatar, created_at, is_active, token_version
            FROM users WHERE username = $1"#,
     )
     .bind(username)
     .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        error!("Database query failed during user lookup: {}", e);
-        ErrorResponse::InternalError("Failed to query user.".to_string())
-    })?;
+    .await?;
 
     match row {
         Some(row) => {
@@ -251,8 +261,11 @@ pub async fn find_user_with_password(
                 email: row.get("email"),
                 nickname: row.get("nickname"),
                 phone_number: row.get("phone_number"),
+                bio: row.get("bio"),
+                avatar: row.get("avatar"),
                 created_at: row.get("created_at"),
                 is_active: row.get("is_active"),
+                token_version: row.get("token_version"),
             };
             Ok(Some((user, password)))
         }
@@ -265,26 +278,41 @@ pub fn router(state: Arc<ServerState>) -> axum::Router<Arc<ServerState>> {
         .route(
             "/register",
             axum::routing::post(register::register)
-                .route_layer(axum::middleware::from_fn(
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
                     middleware::validate::validate_register,
                 ))
-                .route_layer(axum::middleware::from_fn(
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
                     middleware::rate_limit::rate_limit_register,
                 )),
         )
         .route(
             "/login",
             axum::routing::post(login::login)
-                .route_layer(axum::middleware::from_fn(
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
                     middleware::validate::validate_login,
                 ))
-                .route_layer(axum::middleware::from_fn(
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
                     middleware::rate_limit::rate_limit_login,
                 )),
         );
 
     let authenticated = axum::Router::new()
-        .route("/list", axum::routing::get(list::list_users))
+        .route("/search", axum::routing::get(search::search_users))
+        .route("/{user}", axum::routing::get(profile::get_public_profile))
+        .route(
+            "/me",
+            axum::routing::patch(profile::update_profile).delete(delete::delete_account),
+        )
+        .route("/me/logout", axum::routing::post(logout::logout))
+        .route(
+            "/me/password",
+            axum::routing::patch(password::change_password),
+        )
+        .route("/me/avatar", axum::routing::post(avatar::upload_avatar))
         .route_layer(axum::middleware::from_fn_with_state(
             state,
             crate::middleware::authenticate::authenticate,

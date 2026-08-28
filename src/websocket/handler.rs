@@ -59,6 +59,22 @@ pub async fn ws_handler(
     headers: HeaderMap,
     State(state): State<Arc<ServerState>>,
 ) -> Result<impl IntoResponse, ErrorResponse> {
+    // Reject browser-originated upgrades whose Origin is not allowlisted.
+    // Non-browser clients (CLI, native apps) send no Origin header and are
+    // always allowed.
+    if let Some(origin) = headers.get("origin").and_then(|value| value.to_str().ok()) {
+        let allowed = &state.configuration.websocket.allowed_origins;
+        if !allowed.is_empty()
+            && !allowed
+                .iter()
+                .any(|allowed_origin| allowed_origin == origin)
+        {
+            return Err(ErrorResponse::Forbidden(
+                "Origin is not allowed.".to_string(),
+            ));
+        }
+    }
+
     let token = extract_ws_token(&headers)?;
     let claims = validate_token(&token, &state.jwt_secret)?;
 
@@ -77,7 +93,17 @@ pub async fn ws_handler(
         ));
     }
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user, token)))
+    if claims.token_version != user.token_version {
+        return Err(ErrorResponse::Authentication(
+            "Session expired. Please reconnect.".to_string(),
+        ));
+    }
+
+    // Snapshot the version before the user is moved into the socket task;
+    // every later check compares live data against this frozen value.
+    let token_version = user.token_version;
+
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user, token, token_version)))
 }
 
 // Main WebSocket lifecycle handler.
@@ -86,11 +112,14 @@ async fn handle_socket(
     state: Arc<ServerState>,
     user: crate::user::User,
     token: String,
+    token_version: i64,
 ) {
     let manager = &state.connection_manager;
 
     // Per-connection channels (created first so we can send error messages).
     let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<String>();
+
+    let mut shutdown_rx = manager.shutdown_notification();
 
     // Split the WebSocket into sender + receiver halves.
     let (mut ws_sender, mut ws_receiver) = socket.split();
@@ -150,17 +179,19 @@ async fn handle_socket(
     .to_string();
     let _ = msg_tx.send(connected_msg);
 
-    // Heartbeat: send WebSocket protocol-level PING every 30 seconds.
+    let ws_config = &state.configuration.websocket;
+
+    // Heartbeat: send WebSocket protocol-level PING frames.
     // The client library auto-responds with PONG at the frame level.
     // If the send fails, the connection is dead and we break.
-    let mut heartbeat = interval(Duration::from_secs(30));
+    let mut heartbeat = interval(Duration::from_secs(ws_config.heartbeat_interval_secs));
     heartbeat.tick().await; // skip the immediate first tick
 
     let mut msg_timestamps: VecDeque<Instant> = VecDeque::new();
-    const WS_RATE_LIMIT: usize = 30;
-    const WS_RATE_WINDOW: Duration = Duration::from_secs(10);
 
-    let mut re_validate = interval(Duration::from_secs(600));
+    let mut re_validate = interval(Duration::from_secs(
+        ws_config.token_revalidate_interval_secs,
+    ));
     re_validate.tick().await; // skip the immediate first tick
 
     // Main event loop
@@ -183,10 +214,11 @@ async fn handle_socket(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         let now = Instant::now();
-                        while msg_timestamps.front().is_some_and(|t| now - *t > WS_RATE_WINDOW) {
+                        let rate_window = Duration::from_secs(ws_config.message_rate_window_secs);
+                        while msg_timestamps.front().is_some_and(|t| now - *t > rate_window) {
                             msg_timestamps.pop_front();
                         }
-                        if msg_timestamps.len() >= WS_RATE_LIMIT {
+                        if msg_timestamps.len() >= ws_config.message_rate_limit as usize {
                             let err_msg = json!({
                                 "type": WS_ERROR,
                                 "data": { "message": "Rate limit exceeded. Please slow down." }
@@ -195,7 +227,7 @@ async fn handle_socket(
                         } else {
                             msg_timestamps.push_back(now);
                             match handle_incoming(
-                                &state, &user, &text,
+                                &state, &user, &text, token_version,
                             ).await {
                                 Ok(Some(response)) => {
                                     let _ = msg_tx.send(response);
@@ -223,16 +255,19 @@ async fn handle_socket(
             }
 
             _ = re_validate.tick() => {
-                if validate_token(&token, &state.jwt_secret).is_err() {
-                    let err_msg = json!({
-                        "type": WS_ERROR,
-                        "data": { "message": "Token expired. Please reconnect." }
-                    }).to_string();
-                    let _ = msg_tx.send(err_msg);
-                    break;
-                }
+                let claims = match validate_token(&token, &state.jwt_secret) {
+                    Ok(claims) => claims,
+                    Err(_) => {
+                        let err_msg = json!({
+                            "type": WS_ERROR,
+                            "data": { "message": "Token expired. Please reconnect." }
+                        }).to_string();
+                        let _ = msg_tx.send(err_msg);
+                        break;
+                    }
+                };
                 match find_user_by_id(user.id, &state.pool).await {
-                    Ok(Some(u)) if u.is_active => {}
+                    Ok(Some(u)) if u.is_active && u.token_version == claims.token_version => {}
                     Ok(_) => {
                         let err_msg = json!({
                             "type": WS_ERROR,
@@ -250,6 +285,11 @@ async fn handle_socket(
                         let _ = msg_tx.send(err_msg);
                     }
                 }
+            }
+
+            _ = shutdown_rx.recv() => {
+                let _ = ws_sender.send(Message::Close(None)).await;
+                break;
             }
         }
     }
@@ -372,6 +412,7 @@ async fn handle_incoming(
     state: &Arc<ServerState>,
     user: &crate::user::User,
     text: &str,
+    token_version: i64,
 ) -> Result<Option<String>, ErrorResponse> {
     let value: serde_json::Value = serde_json::from_str(text)
         .map_err(|e| ErrorResponse::Json(format!("Invalid WS message JSON: {}", e)))?;
@@ -417,6 +458,11 @@ async fn handle_incoming(
                     "User is inactive.".to_string(),
                 ));
             }
+            if current_user.token_version != token_version {
+                return Err(ErrorResponse::Authentication(
+                    "Session expired. Please reconnect.".to_string(),
+                ));
+            }
 
             let data = value.get("data").ok_or_else(|| {
                 ErrorResponse::Validation("Missing 'data' field in send_message.".to_string())
@@ -438,7 +484,7 @@ async fn handle_incoming(
                     ErrorResponse::Validation("Missing 'content' in send_message data.".to_string())
                 })?;
 
-            let content = validate_message_content(content.to_string())?;
+            let content = crate::chat::validate_message_content(content.to_string(), 5000)?;
 
             find_room_by_id(&state.pool, room_id).await?;
 
@@ -461,11 +507,7 @@ async fn handle_incoming(
             .bind(&content)
             .bind(now)
             .execute(&state.pool)
-            .await
-            .map_err(|error| {
-                error!("Failed to insert message: {}", error);
-                ErrorResponse::InternalError("Failed to send message.".to_string())
-            })?;
+            .await?;
 
             let ws_message = json!({
                 "type": WS_NEW_MESSAGE,
@@ -567,37 +609,12 @@ async fn handle_incoming(
 
 // Query all room IDs the user is a member of.
 async fn get_user_room_ids(pool: &sqlx::PgPool, user_id: Uuid) -> Result<Vec<Uuid>, ErrorResponse> {
-    sqlx::query_scalar::<_, Uuid>("SELECT room_id FROM room_members WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|error| {
-            error!("Failed to query user rooms: {}", error);
-            ErrorResponse::Database("Failed to query user rooms.".to_string())
-        })
-}
-
-fn validate_message_content(content: String) -> Result<String, ErrorResponse> {
-    let sanitized: String = content
-        .chars()
-        .filter(|c| !c.is_control() || *c == '\n')
-        .collect();
-
-    let trimmed = sanitized.trim().to_string();
-
-    if trimmed.is_empty() {
-        return Err(ErrorResponse::Validation(
-            "Message content cannot be empty.".to_string(),
-        ));
-    }
-
-    if trimmed.len() > 5000 {
-        return Err(ErrorResponse::Validation(
-            "Message content exceeds 5000 bytes.".to_string(),
-        ));
-    }
-
-    Ok(trimmed)
+    Ok(
+        sqlx::query_scalar::<_, Uuid>("SELECT room_id FROM room_members WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(pool)
+            .await?,
+    )
 }
 
 fn parse_uuid_field(data: &serde_json::Value, field: &str) -> Result<Uuid, ErrorResponse> {

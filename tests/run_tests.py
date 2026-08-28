@@ -18,11 +18,13 @@ Usage:
 """
 
 import argparse
+import collections
 import datetime
 import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from io import StringIO
@@ -60,6 +62,42 @@ def log(msg):
 def log_file_path():
     """Return the current log file path (None if not set up yet)."""
     return _log_file.name if _log_file else None
+
+
+# Circular buffer of the most recent server stdout lines, used by the
+# failure diagnostics below.
+_server_output_lines = collections.deque(maxlen=200)
+
+
+def drain_server_stdout(server_proc):
+    """Read the server stdout continuously so a full pipe never blocks it."""
+    lines = server_proc.stdout if server_proc.stdout is not None else None
+    if lines is None:
+        return
+    for raw in iter(lines.readline, b""):
+        text = raw.decode(errors="replace").rstrip()
+        _server_output_lines.append(text)
+        if _log_file:
+            _log_file.write(f"  [server] {text}\n")
+
+
+def start_server(binary, env):
+    """Start the server with a stdout drain thread. Returns (proc, pipe_w)."""
+    pipe_r, pipe_w = os.pipe()
+    server_proc = subprocess.Popen(
+        [binary],
+        stdin=pipe_r,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+        cwd=PROJECT_ROOT,
+        pass_fds=(pipe_r,),
+    )
+    os.close(pipe_r)
+    threading.Thread(
+        target=drain_server_stdout, args=(server_proc,), daemon=True
+    ).start()
+    return server_proc, pipe_w
 
 
 def find_server_binary():
@@ -343,17 +381,7 @@ def _run_default(args):
 
     # ── Phase 3: Start server ─────────────────────────────────────
     log(f"Starting server ({binary})...")
-    pipe_r, pipe_w = os.pipe()
-    server_proc = subprocess.Popen(
-        [binary],
-        stdin=pipe_r,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        env=env,
-        cwd=PROJECT_ROOT,
-        pass_fds=(pipe_r,),
-    )
-    os.close(pipe_r)
+    server_proc, pipe_w = start_server(binary, env)
 
     # ── Phase 4: Wait for health ──────────────────────────────────
     log("Waiting for server to become healthy...")
@@ -362,14 +390,13 @@ def _run_default(args):
         log("Server did not become healthy!")
         server_proc.terminate()
         try:
-            stdout, _ = server_proc.communicate(timeout=5)
+            server_proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             server_proc.kill()
-            stdout, _ = server_proc.communicate()
-        if stdout:
+            server_proc.wait()
+        if _server_output_lines:
             log("--- server output (last 30 lines) ---")
-            lines = stdout.decode() if isinstance(stdout, bytes) else stdout
-            for line in lines.strip().splitlines()[-30:]:
+            for line in list(_server_output_lines)[-30:]:
                 log(f"  {line}")
         os.close(pipe_w)
         log(f"Full log saved to: {log_path}")
@@ -453,17 +480,7 @@ def _run_local(args):
 
     # ── Phase 3: Start server ─────────────────────────────────────
     log(f"Starting server ({binary})...")
-    pipe_r, pipe_w = os.pipe()
-    server_proc = subprocess.Popen(
-        [binary],
-        stdin=pipe_r,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        env=env,
-        cwd=PROJECT_ROOT,
-        pass_fds=(pipe_r,),
-    )
-    os.close(pipe_r)
+    server_proc, pipe_w = start_server(binary, env)
 
     # ── Phase 4: Wait for health ──────────────────────────────────
     log("Waiting for server to become healthy...")
@@ -472,14 +489,13 @@ def _run_local(args):
         log("Server did not become healthy!")
         server_proc.terminate()
         try:
-            stdout, _ = server_proc.communicate(timeout=5)
+            server_proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             server_proc.kill()
-            stdout, _ = server_proc.communicate()
-        if stdout:
+            server_proc.wait()
+        if _server_output_lines:
             log("--- server output (last 30 lines) ---")
-            lines = stdout.decode() if isinstance(stdout, bytes) else stdout
-            for line in lines.strip().splitlines()[-30:]:
+            for line in list(_server_output_lines)[-30:]:
                 log(f"  {line}")
         os.close(pipe_w)
         log(f"Full log saved to: {log_file_path()}")
