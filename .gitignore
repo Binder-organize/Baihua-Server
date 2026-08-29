@@ -21,8 +21,10 @@ target
 
 # AI Agents
 AGENTS.md
+QWEN.md
 .omo
 .codegraph
+.qwen
 
 # Tests
 tests/logs
