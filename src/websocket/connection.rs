@@ -7,23 +7,17 @@ use uuid::Uuid;
 
 type RoomSubKey = (Uuid, Uuid);
 
-// A subscription entry tracks the cancel channel and a generation counter.
-// The generation prevents stale disconnect cleanup from canceling a fresh
-// re-subscription: each new register_subscription bumps the generation, and
-// cancel_subscription only acts when the stored generation matches.
-struct SubEntry {
-    generation: u64,
-    sender: watch::Sender<bool>,
-}
-
 // Manages all active WebSocket connections:
 // - Per-room broadcast channels for real-time message delivery.
 // - Per-user connection counters for online/offline presence.
-// - Per-(user, room) cancel signals so leaving a room auto-unsubscribes WS.
+// - Per-connection cancel signals so each connection can be independently
+//   unsubscribed without affecting other connections for the same user+room.
 pub struct ConnectionManager {
     rooms: RwLock<HashMap<Uuid, broadcast::Sender<String>>>,
     user_connections: RwLock<HashMap<Uuid, usize>>,
-    subs: RwLock<HashMap<RoomSubKey, SubEntry>>,
+    // (user_id, room_id) -> { subscription_id -> watch::Sender }
+    // Each connection gets its own watch channel; leave/kick cancels all.
+    subs: RwLock<HashMap<RoomSubKey, HashMap<Uuid, watch::Sender<bool>>>>,
 
     // Encrypted session state
     active_sessions: RwLock<HashMap<Uuid, Instant>>,
@@ -85,57 +79,57 @@ impl ConnectionManager {
         }
     }
 
-    // Register that a user has subscribed to a room.
-    // Returns (Receiver, generation). The generation token must be passed to
-    // cancel_subscription to avoid stale disconnect cleanup killing a fresh
-    // re-subscription.
+    // Register a new subscription for a user in a room.
+    // Returns (Receiver, subscription_id). Each call creates an independent
+    // watch channel so disconnect cleanup only affects its own forward task.
     pub fn register_subscription(
         &self,
         user_id: Uuid,
         room_id: Uuid,
-    ) -> (watch::Receiver<bool>, u64) {
+    ) -> (watch::Receiver<bool>, Uuid) {
+        let subscription_id = Uuid::now_v7();
+        let (tx, rx) = watch::channel(false);
         let mut subs = self
             .subs
             .write()
             .expect("ConnectionManager subs lock poisoned");
-        let entry = subs.entry((user_id, room_id)).or_insert_with(|| {
-            let (tx, _) = watch::channel(false);
-            SubEntry {
-                generation: 0,
-                sender: tx,
-            }
-        });
-        entry.generation += 1;
-        let generation = entry.generation;
-        (entry.sender.subscribe(), generation)
+        subs.entry((user_id, room_id))
+            .or_default()
+            .insert(subscription_id, tx);
+        (rx, subscription_id)
     }
 
-    // Unconditionally cancel a user's subscription to a room.
-    // Used for explicit leave/kick where the cancel must always take effect.
+    // Unconditionally cancel ALL subscriptions for a user in a room.
+    // Used for explicit leave/kick where every connection must be unsubscribed.
     pub fn cancel_subscription(&self, user_id: Uuid, room_id: Uuid) {
-        if let Some(entry) = self
+        if let Some(senders) = self
             .subs
             .write()
             .expect("ConnectionManager subs lock poisoned")
             .remove(&(user_id, room_id))
         {
-            let _ = entry.sender.send(true);
+            for (_, sender) in senders {
+                let _ = sender.send(true);
+            }
         }
     }
 
-    // Cancel a subscription only if the generation matches.
-    // Used during disconnect cleanup to avoid killing a fresh re-subscription
-    // that raced with the stale disconnect handler.
-    pub fn cancel_stale_subscription(&self, user_id: Uuid, room_id: Uuid, generation: u64) {
+    // Cancel a single subscription by its ID.
+    // Used during disconnect cleanup so only this connection's forward task
+    // exits; other connections for the same user+room are unaffected.
+    // Also removes the inner entry; cleans up the outer map when empty.
+    pub fn cancel_stale_subscription(&self, user_id: Uuid, room_id: Uuid, subscription_id: Uuid) {
         let mut subs = self
             .subs
             .write()
             .expect("ConnectionManager subs lock poisoned");
-        if let Some(entry) = subs.get(&(user_id, room_id))
-            && entry.generation == generation
-        {
-            let entry = subs.remove(&(user_id, room_id)).unwrap();
-            let _ = entry.sender.send(true);
+        if let Some(senders) = subs.get_mut(&(user_id, room_id)) {
+            if let Some(sender) = senders.remove(&subscription_id) {
+                let _ = sender.send(true);
+            }
+            if senders.is_empty() {
+                subs.remove(&(user_id, room_id));
+            }
         }
     }
 

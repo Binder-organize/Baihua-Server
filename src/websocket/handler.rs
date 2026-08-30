@@ -160,8 +160,8 @@ async fn handle_socket(
         }
     }
 
-    // Track which rooms this connection is subscribed to (room_id -> generation).
-    let mut subscribed_rooms: HashMap<Uuid, u64> = HashMap::new();
+    // Track which rooms this connection is subscribed to (room_id -> subscription_id).
+    let mut subscribed_rooms: HashMap<Uuid, Uuid> = HashMap::new();
 
     // Auto-subscribe: connect → immediately subscribe to all rooms.
     for &room_id in &user_room_ids {
@@ -295,9 +295,9 @@ async fn handle_socket(
     }
 
     // Cleanup: cancel all room subscriptions to clean up ConnectionManager.subs.
-    // Use cancel_stale_subscription so a racing reconnect does not get killed.
-    for (&room_id, &generation) in &subscribed_rooms {
-        manager.cancel_stale_subscription(user.id, room_id, generation);
+    // Use cancel_stale_subscription so only this connection's forward tasks exit.
+    for (&room_id, &subscription_id) in &subscribed_rooms {
+        manager.cancel_stale_subscription(user.id, room_id, subscription_id);
     }
 
     let fully_offline = manager.user_disconnected(user.id);
@@ -329,14 +329,14 @@ fn subscribe_to_room(
     room_id: Uuid,
     state: &Arc<ServerState>,
     msg_tx: &mpsc::UnboundedSender<String>,
-    subscribed_rooms: &mut HashMap<Uuid, u64>,
+    subscribed_rooms: &mut HashMap<Uuid, Uuid>,
 ) {
     if subscribed_rooms.contains_key(&room_id) {
         return;
     }
 
     let mut rx = state.connection_manager.subscribe(room_id);
-    let (mut cancel_rx, generation) = state
+    let (mut cancel_rx, subscription_id) = state
         .connection_manager
         .register_subscription(user_id, room_id);
     let forward_tx = msg_tx.clone();
@@ -372,7 +372,7 @@ fn subscribe_to_room(
         }
     });
 
-    subscribed_rooms.insert(room_id, generation);
+    subscribed_rooms.insert(room_id, subscription_id);
 }
 
 // Check whether a broadcast message is a typing indicator from the given user.
